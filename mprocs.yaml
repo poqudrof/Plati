@@ -1,0 +1,8 @@
+procs:
+  backend:
+    cmd: ["go", "run", "./cmd/plati-server", "-config", "../config/plati.yaml"]
+    cwd: backend
+
+  frontend:
+    cmd: ["npm", "run", "dev"]
+    cwd: frontend

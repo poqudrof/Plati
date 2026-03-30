@@ -1,0 +1,22 @@
+name: Python Development
+slug: python-dev
+description: Python 3.12 development environment with common tools
+image: images:ubuntu/24.04
+profiles:
+  - default
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+cloud_init: |
+  #cloud-config
+  packages:
+    - git
+    - curl
+    - build-essential
+    - python3.12
+    - python3.12-venv
+    - python3-pip
+  runcmd:
+    - update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+    - pip install poetry

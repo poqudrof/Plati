@@ -1,0 +1,9 @@
+CREATE TABLE instance_secrets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(instance_id, name)
+);

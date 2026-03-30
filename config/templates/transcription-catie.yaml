@@ -1,0 +1,40 @@
+name: Transcription CATIE
+slug: transcription-catie
+description: Container système pour le service de transcription audio (Whisper + pyannote)
+image: images:ubuntu/24.04
+profiles:
+  - default
+resources:
+  cpu: 4
+  memory: 8GB
+  disk: 30GB
+cloud_init: |
+  #cloud-config
+  packages:
+    - git
+    - curl
+    - python3.12
+    - python3.12-venv
+    - python3-pip
+    - ffmpeg
+  runcmd:
+    - git clone https://github.com/catie-aq/transcription-catie.git /srv/transcription-catie
+    - cd /srv/transcription-catie && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+    - |
+      cat > /etc/systemd/system/transcription-catie.service <<EOF
+      [Unit]
+      Description=Transcription CATIE
+      After=network.target
+
+      [Service]
+      WorkingDirectory=/srv/transcription-catie
+      ExecStart=/srv/transcription-catie/venv/bin/python transcribe.py
+      Restart=on-failure
+      Environment=PYTHONUNBUFFERED=1
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+    - systemctl daemon-reload
+    - systemctl enable transcription-catie
+    - systemctl start transcription-catie

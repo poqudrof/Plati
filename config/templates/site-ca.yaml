@@ -1,0 +1,38 @@
+name: Site CA
+slug: site-ca
+description: Container système pour le site Next.js de CATIE (production)
+image: images:ubuntu/24.04
+profiles:
+  - default
+resources:
+  cpu: 2
+  memory: 2GB
+  disk: 10GB
+cloud_init: |
+  #cloud-config
+  packages:
+    - git
+    - curl
+  runcmd:
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - git clone https://github.com/catie-aq/site-ca.git /srv/site-ca
+    - cd /srv/site-ca && npm ci && npm run build
+    - |
+      cat > /etc/systemd/system/site-ca.service <<EOF
+      [Unit]
+      Description=Site CA Next.js
+      After=network.target
+
+      [Service]
+      WorkingDirectory=/srv/site-ca
+      ExecStart=/usr/bin/node_modules/.bin/next start -p 3000
+      Restart=always
+      Environment=NODE_ENV=production
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+    - systemctl daemon-reload
+    - systemctl enable site-ca
+    - systemctl start site-ca

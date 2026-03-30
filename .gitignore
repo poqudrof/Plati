@@ -1,0 +1,44 @@
+# Config with secrets
+config/plati.yaml
+
+# Go
+backend/plati-server
+backend/tmp/
+
+# Frontend
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
+# Playwright
+frontend/tests/.auth/
+frontend/tests/screenshots/
+frontend/tests/screenshots-output/
+frontend/playwright-report/
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Clés SSH (ne jamais versionner)
+*.pem
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub

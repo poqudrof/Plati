@@ -1,0 +1,20 @@
+name: Node.js Development
+slug: node-dev
+description: Node.js 22 LTS development environment with common tools
+image: images:ubuntu/24.04
+profiles:
+  - default
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+cloud_init: |
+  #cloud-config
+  packages:
+    - git
+    - curl
+    - build-essential
+  runcmd:
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - npm install -g pnpm

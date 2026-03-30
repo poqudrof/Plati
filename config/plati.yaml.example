@@ -1,0 +1,41 @@
+# Plati Platform Configuration
+# Copy this file to config/plati.yaml and fill in the values.
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  frontend_url: "http://localhost:5173"
+
+auth:
+  # Microsoft Entra ID (Azure AD) OIDC
+  entra_client_id: ""
+  entra_client_secret: ""
+  entra_tenant_id: ""
+
+  # Admin local login - generate hash with: htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
+  admin_password_hash: ""
+
+  # JWT signing secret - generate with: openssl rand -hex 32
+  jwt_secret: ""
+  # JWT token lifetime in hours
+  jwt_lifetime_hours: 24
+
+# AES-256 key for encrypting user secrets - generate with: openssl rand -hex 32
+secret_encryption_key: ""
+
+database:
+  path: "plati.db"
+
+# Incus servers
+servers:
+  - name: "default"
+    endpoint: "https://incus.example.com:8443"
+    tls_client_cert: "/path/to/client.crt"
+    tls_client_key: "/path/to/client.key"
+    max_instances: 50
+
+# Auto-sleep: duration before idle instances are stopped (e.g. "4h", "30m")
+sleep_timeout: "4h"
+
+# Templates directory for JSON import
+templates_dir: "config/templates"

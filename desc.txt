@@ -1,0 +1,350 @@
+Je te fais une description claire et actionnable que tu peux transmettre directement à tes ingénieurs.
+
+----------
+🧩 Projet : Plateforme de Workspaces de Développement (Incus-based)
+🎯 Objectif
+
+Construire une plateforme interne permettant de créer et gérer des environnements de développement prêts à l’emploi, persistants, accessibles via SSH/Tailscale, et reproductibles à partir de templates.
+Le système doit être :
+
+- simple pour les utilisateurs
+- contrôlable par des experts
+- léger en infrastructure
+- basé sur Incus comme moteur principal
+----------
+🧠 Concept clé
+> Une instance = environnement remplaçable
+> Un workspace (volume) = données persistantes
+
+Les utilisateurs travaillent dans un dossier persistant (`/workspace`) monté dans des environnements recréables à partir de templates.
+
+----------
+🏗️ Architecture globale
+
+1. Backend (Go)
+Responsabilités :
+
+- orchestrer Incus via API REST
+- gérer les utilisateurs et authentification
+- gérer les templates et instances
+- gérer les secrets et clés SSH
+- exposer API pour UI
+
+👉 Incus expose une API complète permettant :
+
+- création d’instances
+- gestion des images
+- gestion des profils
+- gestion du stockage
+- lifecycle (start/stop/delete)
+----------
+
+2. Frontend (Svelte)
+Interface simple orientée usage :
+Utilisateur :
+
+- liste des environnements
+- créer / démarrer / arrêter / supprimer
+- voir infos de connexion (SSH / VS Code)
+- gérer clés SSH
+- gérer secrets simples
+- accès rapide (copier commande SSH)
+
+Admin / expert :
+
+- créer templates
+- créer environnements pour un user
+- choisir serveur cible
+- rebuild instance
+- voir consommation ressources
+- gérer images
+----------
+
+3. Incus (1 à N serveurs)
+Chaque serveur Incus :
+
+- héberge containers système (par défaut)
+- éventuellement VMs
+- expose API sécurisée
+- gère stockage local
+
+Pas de cluster complexe requis (MVP).
+
+----------
+🔑 Fonctionnalités principales
+
+1. Gestion des environnements
+Un environnement = instance Incus + volume persistant
+Actions :
+
+- create (depuis template)
+- start / stop
+- delete
+- rebuild (recréer sans perdre workspace)
+----------
+
+2. Templates de dev (Gitpod-like) [. -- UI et Code avec export depuis l’ui et import dans l’ui des json]
+
+[ Mappe ce que fait incus !!! Ne crée pas de nouveaux méchanismes ici. Passe ça en JSON. ]
+Un template contient :
+
+    name: node-dev
+    image: workspace-node:2026-03
+    type: container
+    profiles:
+      - base
+      - docker
+    resources:
+      cpu: 2
+      memory: 4GB
+      disk: 20GB
+    workspace:
+      mount: /workspace
+    cloud_init:
+      vendor_data: ...
+
+Structure logique :
+
+- image Incus custom
+- profil(s) Incus
+- config ressources
+- montage workspace
+- cloud-init (léger)
+----------
+
+3. Images de base
+Créées par les experts :
+Exemples :
+
+- `workspace-base`
+- `workspace-node`
+- `workspace-python`
+- `workspace-docker`
+
+Contiennent :
+
+- user dev
+- outils de base
+- runtime (node/python/etc)
+- éventuellement VS Code server
+- Docker (si template spécifique)
+
+👉 Création via snapshot ou build image Incus
+
+----------
+
+4. Workspace persistant
+Utilisation de volumes Incus custom :
+
+- attachés à l’instance
+- montés dans `/workspace`
+- non supprimés avec l’instance
+
+Permet :
+
+- rebuild sans perte
+- migration future
+- sauvegarde indépendante
+----------
+
+5. Cloud-init (usage ciblé)
+Utilisé uniquement pour :
+
+- bootstrap projet
+- config initiale
+- injection clés SSH
+- scripts d’init
+
+❌ Pas utilisé pour construire tout l’environnement
+Séparation :
+
+- `vendor-data` = template
+- `user-data` = instance
+----------
+
+6. Accès aux environnements
+Principal :
+
+- SSH via Tailscale
+
+Secondaire :
+
+- VS Code Remote / code-server
+- sshx (optionnel)
+
+UI fournit :
+
+- commande SSH
+- hostname / IP
+- user
+----------
+
+7. Gestion des clés SSH
+Chaque utilisateur peut :
+
+- ajouter / supprimer clés
+- sélectionner clés actives
+
+Injectées via :
+
+- cloud-init
+- ou
+- config instance
+----------
+
+8. Gestion des secrets (simple)
+Stockage côté backend :
+Exemples :
+
+- tokens API
+- variables d’environnement
+
+Utilisation :
+
+- injectés au bootstrap (cloud-init)
+- disponibles dans `/workspace/.env` ou équivalent
+
+⚠️ Scope volontairement simple (pas Vault-like)
+
+----------
+
+9. Multi-serveurs (simple)
+Backend gère plusieurs serveurs Incus :
+Fonction :
+
+- choisir serveur à la création (manuel ou simple règle)
+- stocker mapping instance → serveur
+
+Pas de scheduling complexe.
+
+----------
+
+10. Mise en sommeil automatique
+Fonction :
+
+- stop instance après inactivité
+- configurable par template ou utilisateur
+
+Critères possibles :
+
+- pas de connexion SSH
+- uptime
+- activité CPU faible (optionnel)
+----------
+📦 Modèle de données simplifié. ---−> Tu peux l’améliorer ! 
+
+User
+
+- id
+- email (via Entra)
+- ssh_keys[]
+- secrets[]
+- role
+
+Template
+
+- id
+- name
+- image
+- type (container/vm)
+- profiles[]
+- resources
+- cloud_init
+- version
+
+Instance
+
+- id
+- user_id
+- template_id
+- server_id
+- status
+- resources
+- workspace_volume_id
+- created_at
+- last_activity
+
+Volume
+
+- id
+- size
+- attached_instance_id
+
+Server
+
+- id
+- incus_endpoint
+- auth config
+- capacity info
+----------
+🔐 Authentification
+
+Login via Microsoft Entra ID :
+
+- OAuth2 / OpenID Connect
+- récupération email + ID utilisateur
+- mapping interne
+----------
+
+Ajoute un login MDP pour l’adminisrtateur. 
+
+🧰 Stack technique recommandée
+
+Backend
+
+- Go
+- client HTTP vers API Incus
+- DB simple (PostgreSQL ou SQLite au début)
+- worker async (goroutines)
+
+Frontend
+
+- Svelte / SvelteKit
+- API REST
+- UI minimaliste
+----------
+⚙️ Flux principal
+
+Création d’un environnement
+
+1. User choisit template
+2. Backend :
+    - valide
+    - choisit serveur (si l’utilisateur ne n’a pas donné)
+3. Création volume workspace
+4. Création instance Incus :
+    - image
+    - profiles
+    - limits
+    - volume attaché
+    - cloud-init injecté
+5. Start instance
+6. Retour UI avec accès
+----------
+🧪 MVP (phase 1)
+- 1 serveur Incus
+- containers uniquement
+- 2 templates
+- workspace persistant
+- SSH via Tailscale
+- UI simple
+- pas de multi-tenant complexe
+- pas de scheduling
+----------
+🚧 Évolutions possibles (plus tard)
+- images build automatisé
+- versioning avancé des templates
+- snapshots utilisateurs
+- multi-host intelligent
+- audit logs détaillés
+----------
+⚠️ Contraintes et limites
+- Docker dans container → nécessite config spécifique (`nesting`)
+- stockage = point critique
+- pas de forte isolation (utilisateurs de confiance)
+- cloud-init limité au bootstrap
+- dépendance à Tailscale pour accès
+----------
+💡 Philosophie produit
+> “Fournir des environnements prêts à coder en 1 clic, sans gérer une infrastructure cloud complexe.”
+
