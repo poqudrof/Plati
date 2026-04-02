@@ -6,13 +6,14 @@ import (
 )
 
 type User struct {
-	ID        int64          `db:"id" json:"id"`
-	Email     string         `db:"email" json:"email"`
-	Name      string         `db:"name" json:"name"`
-	Role      string         `db:"role" json:"role"` // "admin" or "user"
-	EntraID   sql.NullString `db:"entra_id" json:"-"`
-	CreatedAt time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time      `db:"updated_at" json:"updated_at"`
+	ID           int64          `db:"id" json:"id"`
+	Email        string         `db:"email" json:"email"`
+	Name         string         `db:"name" json:"name"`
+	Role         string         `db:"role" json:"role"` // "admin" or "user"
+	EntraID      sql.NullString `db:"entra_id" json:"-"`
+	PasswordHash sql.NullString `db:"password_hash" json:"-"`
+	CreatedAt    time.Time      `db:"created_at" json:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
 }
 
 type SSHKey struct {
@@ -75,17 +76,39 @@ type Server struct {
 }
 
 type Template struct {
-	ID          int64     `db:"id" json:"id"`
-	Name        string    `db:"name" json:"name"`
-	Slug        string    `db:"slug" json:"slug"`
-	Description string    `db:"description" json:"description"`
-	Image       string    `db:"image" json:"image"`
-	Profiles    string    `db:"profiles" json:"profiles"`   // JSON array
-	Resources   string    `db:"resources" json:"resources"` // JSON object
-	CloudInit   string    `db:"cloud_init" json:"cloud_init"`
-	IsActive    bool      `db:"is_active" json:"is_active"`
-	CreatedAt   time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+	ID                 int64     `db:"id" json:"id"`
+	Name               string    `db:"name" json:"name"`
+	Slug               string    `db:"slug" json:"slug"`
+	Description        string    `db:"description" json:"description"`
+	Image              string    `db:"image" json:"image"`
+	Profiles           string    `db:"profiles" json:"profiles"`   // JSON array
+	Resources          string    `db:"resources" json:"resources"` // JSON object
+	CloudInit          string    `db:"cloud_init" json:"cloud_init"`
+	TerminalUser       string    `db:"terminal_user" json:"terminal_user"`               // non-root login user; empty = root only
+	PostCreateCommands string    `db:"post_create_commands" json:"post_create_commands"` // JSON array (deprecated)
+	PersistenceMode    string    `db:"persistence_mode"    json:"persistence_mode"`      // "normal" | "ephemeral"
+	PersistenceDirs    string    `db:"persistence_dirs"    json:"persistence_dirs"`      // JSON array of {path,size,pool}
+	FirstInitCommands  string    `db:"first_init_commands" json:"first_init_commands"`   // JSON array
+	RebuildCommands    string    `db:"rebuild_commands"    json:"rebuild_commands"`      // JSON array
+	Includes           string    `db:"includes"            json:"includes"`               // JSON array of mixin names
+	IsActive           bool      `db:"is_active" json:"is_active"`
+	CreatedAt          time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
+}
+
+type UserPreferences struct {
+	UserID        int64     `db:"user_id"        json:"user_id"`
+	SSHKeyMode    string    `db:"ssh_key_mode"   json:"ssh_key_mode"`
+	TailscaleMode string    `db:"tailscale_mode" json:"tailscale_mode"`
+	UpdatedAt     time.Time `db:"updated_at"     json:"updated_at"`
+}
+
+type InstanceVolume struct {
+	ID         int64  `db:"id"          json:"id"`
+	InstanceID int64  `db:"instance_id" json:"instance_id"`
+	VolumeID   int64  `db:"volume_id"   json:"volume_id"`
+	MountPath  string `db:"mount_path"  json:"mount_path"`
+	DeviceName string `db:"device_name" json:"device_name"`
 }
 
 type Volume struct {
@@ -107,6 +130,7 @@ type Instance struct {
 	IncusName    string         `db:"incus_name" json:"incus_name"`
 	Status       string         `db:"status" json:"status"` // creating, running, stopped, error
 	IPAddress    sql.NullString `db:"ip_address" json:"ip_address"`
+	CreationLog  string         `db:"creation_log" json:"creation_log"`
 	LastActiveAt sql.NullTime   `db:"last_active_at" json:"last_active_at"`
 	CreatedAt    time.Time      `db:"created_at" json:"created_at"`
 	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`

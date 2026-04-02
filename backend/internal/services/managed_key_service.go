@@ -2,6 +2,9 @@ package services
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/jmoiron/sqlx"
 
@@ -12,10 +15,11 @@ import (
 type ManagedKeyService struct {
 	db      *sqlx.DB
 	userSvc *UserService
+	keysDir string
 }
 
-func NewManagedKeyService(db *sqlx.DB, userSvc *UserService) *ManagedKeyService {
-	return &ManagedKeyService{db: db, userSvc: userSvc}
+func NewManagedKeyService(db *sqlx.DB, userSvc *UserService, keysDir string) *ManagedKeyService {
+	return &ManagedKeyService{db: db, userSvc: userSvc, keysDir: keysDir}
 }
 
 // GenerateManagedKey creates a new admin-managed keypair.
@@ -33,6 +37,15 @@ func (s *ManagedKeyService) GenerateManagedKey(name string) (*models.ManagedSSHK
 	if err != nil {
 		return nil, "", fmt.Errorf("save managed key: %w", err)
 	}
+	if s.keysDir != "" {
+		dir := filepath.Join(s.keysDir, fmt.Sprintf("managed_%d", id))
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			log.Printf("warning: create managed key dir %s: %v", dir, err)
+		} else {
+			os.WriteFile(filepath.Join(dir, "id_rsa"), []byte(privateKeyPEM), 0600)
+			os.WriteFile(filepath.Join(dir, "id_rsa.pub"), []byte(publicKey), 0644)
+		}
+	}
 	key := &models.ManagedSSHKey{
 		ID:        id,
 		Name:      name,
@@ -46,7 +59,13 @@ func (s *ManagedKeyService) ListManagedKeys() ([]models.ManagedSSHKey, error) {
 }
 
 func (s *ManagedKeyService) DeleteManagedKey(id int64) error {
-	return queries.DeleteManagedSSHKey(s.db, id)
+	if err := queries.DeleteManagedSSHKey(s.db, id); err != nil {
+		return err
+	}
+	if s.keysDir != "" {
+		os.RemoveAll(filepath.Join(s.keysDir, fmt.Sprintf("managed_%d", id)))
+	}
+	return nil
 }
 
 func (s *ManagedKeyService) GetManagedKeyUsers(keyID int64) ([]int64, error) {

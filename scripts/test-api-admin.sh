@@ -37,6 +37,13 @@ echo ""
 api POST /auth/login -d "{\"password\":\"$ADMIN_PASSWORD\"}" > /dev/null
 pass "Admin login"
 
+# Pre-cleanup: remove any leftover test template from a previous failed run
+EXISTING_ID=$(api GET /api/v1/templates | python3 -c "import sys,json; ts=json.load(sys.stdin); ids=[str(t['id']) for t in ts if t['slug']=='test-go-dev']; print(ids[0] if ids else '')" 2>/dev/null || echo "")
+if [ -n "$EXISTING_ID" ]; then
+    api DELETE "/api/v1/admin/templates/$EXISTING_ID" > /dev/null || true
+    info "Pre-cleanup: removed stale test-go-dev template (id=$EXISTING_ID)"
+fi
+
 # -- Template Import ----------------------------------------------
 echo "1. Import template via API"
 IMPORT_DATA='{
@@ -69,7 +76,8 @@ fi
 # -- Template Export ----------------------------------------------
 echo "3. Export template"
 EXPORT=$(api GET "/api/v1/templates/$IMPORT_ID/export")
-EXPORT_NAME=$(echo "$EXPORT" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])" 2>/dev/null || echo "")
+# Export endpoint returns YAML; extract name with grep
+EXPORT_NAME=$(echo "$EXPORT" | grep '^name:' | sed 's/^name:[[:space:]]*//')
 if [ "$EXPORT_NAME" = "Test Go Dev" ]; then
     pass "Template export matches: $EXPORT_NAME"
 else
@@ -184,8 +192,63 @@ SECRETS2=$(api GET /api/v1/secrets)
 SEC_COUNT=$(echo "$SECRETS2" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 pass "Secret deleted (remaining: $SEC_COUNT)"
 
+# -- Admin Tailscale Key Lifecycle ---------------------------------
+echo "10. Admin Tailscale key lifecycle"
+# Check not configured
+TS_STATUS=$(api GET /api/v1/admin/settings/tailscale-key)
+TS_CONFIGURED=$(echo "$TS_STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('configured',None))" 2>/dev/null || echo "")
+if [ "$TS_CONFIGURED" = "False" ]; then
+    pass "Tailscale key initially not configured"
+else
+    info "Tailscale key status: $TS_CONFIGURED"
+fi
+
+# Set key
+api PUT /api/v1/admin/settings/tailscale-key -d '{"value":"tskey-auth-test-key-123"}' > /dev/null
+TS_STATUS=$(api GET /api/v1/admin/settings/tailscale-key)
+TS_CONFIGURED=$(echo "$TS_STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('configured',None))" 2>/dev/null || echo "")
+if [ "$TS_CONFIGURED" = "True" ]; then
+    pass "Tailscale key set successfully"
+else
+    fail "Tailscale key not configured after set: $TS_STATUS"
+fi
+
+# Delete key
+api DELETE /api/v1/admin/settings/tailscale-key > /dev/null
+TS_STATUS=$(api GET /api/v1/admin/settings/tailscale-key)
+TS_CONFIGURED=$(echo "$TS_STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('configured',None))" 2>/dev/null || echo "")
+if [ "$TS_CONFIGURED" = "False" ]; then
+    pass "Tailscale key deleted"
+else
+    fail "Tailscale key still configured after delete"
+fi
+
+# -- Preferences API ----------------------------------------------
+echo "11. Preferences API"
+PREFS=$(api GET /api/v1/preferences)
+SSH_MODE=$(echo "$PREFS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('ssh_key_mode',''))" 2>/dev/null || echo "")
+if [ "$SSH_MODE" = "plati" ]; then
+    pass "Default SSH key mode: plati"
+else
+    info "SSH key mode: $SSH_MODE"
+fi
+
+# Update to personal
+api PUT /api/v1/preferences -d '{"ssh_key_mode":"personal","tailscale_mode":"personal"}' > /dev/null
+PREFS=$(api GET /api/v1/preferences)
+SSH_MODE=$(echo "$PREFS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('ssh_key_mode',''))" 2>/dev/null || echo "")
+if [ "$SSH_MODE" = "personal" ]; then
+    pass "Preferences updated to personal"
+else
+    fail "Preferences update failed: $PREFS"
+fi
+
+# Reset back to plati
+api PUT /api/v1/preferences -d '{"ssh_key_mode":"plati","tailscale_mode":"plati"}' > /dev/null
+pass "Preferences reset to plati"
+
 # -- Unauthorized Access ------------------------------------------
-echo "10. Unauthorized access check"
+echo "12. Unauthorized access check"
 api POST /auth/logout > /dev/null
 UNAUTH=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/v1/instances")
 if [ "$UNAUTH" = "401" ]; then

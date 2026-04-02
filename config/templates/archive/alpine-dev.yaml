@@ -1,0 +1,24 @@
+name: Alpine Dev
+slug: alpine-dev
+description: Alpine Linux 3.20 development environment (no cloud-init required)
+image: images:alpine/3.20
+profiles:
+  - default
+resources:
+  cpu: 1
+  memory: 2GB
+  disk: 10GB
+
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 10GB
+      pool: default
+
+first_init_commands:
+  - apk add --no-cache git curl openssh-client
+  - mkdir -p /workspace
+
+rebuild_commands:
+  - cd /workspace && git pull --ff-only 2>/dev/null || true

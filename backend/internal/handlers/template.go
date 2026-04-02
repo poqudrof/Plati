@@ -119,3 +119,68 @@ func (h *TemplateHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, tmpl)
 }
+
+// ListMixins returns all available mixins loaded from disk.
+func (h *TemplateHandler) ListMixins(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.svc.ListMixins())
+}
+
+// Duplicate clones a template with a new name and slug.
+func (h *TemplateHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Slug == "" {
+		writeError(w, http.StatusBadRequest, "name and slug are required")
+		return
+	}
+	tmpl, err := h.svc.DuplicateTemplate(id, req.Name, req.Slug)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, tmpl)
+}
+
+// ExportYAMLAsJSON returns the template YAML as a JSON-wrapped string.
+func (h *TemplateHandler) ExportYAMLAsJSON(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	data, err := h.svc.ExportYAML(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "template not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"yaml": string(data)})
+}
+
+// UpdateFromYAML parses a YAML string from the request body and updates the template.
+func (h *TemplateHandler) UpdateFromYAML(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.YAML == "" {
+		writeError(w, http.StatusBadRequest, "yaml field is required")
+		return
+	}
+	tmpl, err := h.svc.UpdateFromYAML(id, []byte(req.YAML))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tmpl)
+}

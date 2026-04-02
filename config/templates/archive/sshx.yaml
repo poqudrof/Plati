@@ -1,0 +1,15 @@
+name: SSHX
+slug: sshx
+description: System container with SSHX installed for collaborative web-based terminal sharing
+image: images:ubuntu/24.04
+profiles:
+  - default
+resources:
+  cpu: 1
+  memory: 512MB
+  disk: 5GB
+includes:
+  - sshx
+
+persistence:
+  mode: ephemeral

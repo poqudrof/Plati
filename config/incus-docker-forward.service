@@ -1,0 +1,13 @@
+[Unit]                                                                                                        
+Description=Allow Incus bridge forwarding through Docker firewall
+After=docker.service incus.service                                                                            
+Wants=docker.service              
+                                                                                                              
+[Service]                                                       
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -i incusbr0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i incusbr0 -j ACCEPT'                                                                                           
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -o incusbr0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -o incusbr0 -j ACCEPT'                                                                                           
+                                                                                                              
+[Install]                                                       
+WantedBy=multi-user.target   

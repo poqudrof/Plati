@@ -1,0 +1,11 @@
+name: Docker mixin
+post_create_commands:
+  # Install Docker CE with fuse-overlayfs for unprivileged Incus containers.
+  # Commands are chained with && so a failure in any step aborts the chain.
+  - apt-get update -y && apt-get install -y curl ca-certificates fuse-overlayfs
+  - install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" | tee /etc/apt/sources.list.d/docker.list
+  - apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  # Use fuse-overlayfs storage driver — native overlayfs fails in unprivileged Incus containers
+  - mkdir -p /etc/docker && echo '{"storage-driver":"fuse-overlayfs"}' > /etc/docker/daemon.json
+  - systemctl daemon-reload && systemctl enable containerd docker && systemctl start containerd && systemctl start docker

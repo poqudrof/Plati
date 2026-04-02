@@ -10,7 +10,7 @@
 
   async function load() {
     try {
-      keys = await users.listSSHKeys();
+      keys = await users.listUserKeys();
     } catch (e: any) {
       addNotification('error', e.message);
     }
@@ -20,7 +20,7 @@
     if (!newName.trim()) return;
     loading = true;
     try {
-      generated = await users.generateSSHKey(newName.trim());
+      generated = await users.generateUserKey(newName.trim());
       newName = '';
       await load();
     } catch (e: any) {
@@ -32,7 +32,7 @@
 
   async function remove(id: number) {
     try {
-      await users.deleteSSHKey(id);
+      await users.deleteUserKey(id);
       await load();
       addNotification('success', 'Key removed');
     } catch (e: any) {

@@ -1,0 +1,37 @@
+# Dev-only compose — bind-mounted sources, no build steps, no nginx
+# Access: frontend http://localhost:5173  (Vite proxies /api, /auth, /health → backend)
+#
+# First run: copy config/plati.yaml.example → config/plati.yaml and fill in secrets
+# Usage: docker compose -f docker-compose.dev.yml up
+
+services:
+  backend:
+    image: golang:1.23
+    working_dir: /workspace/backend
+    command: go run ./cmd/plati-server -config /workspace/config/plati.yaml
+    volumes:
+      - ./backend:/workspace/backend        # source
+      - ./config:/workspace/config          # plati.yaml + templates + certs
+      - go-pkg:/go/pkg                      # module/build cache
+    network_mode: host
+    environment:
+      CGO_ENABLED: "1"
+    restart: unless-stopped
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5300"
+    volumes:
+      - ./frontend:/workspace/frontend      # source
+      - frontend-nm:/workspace/frontend/node_modules  # isolated node_modules
+    network_mode: host
+    environment:
+      BACKEND_HOST: localhost
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  go-pkg:
+  frontend-nm:

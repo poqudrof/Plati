@@ -5,12 +5,13 @@
   import { addNotification } from '$lib/stores/notifications';
 
   let password = $state('');
+  let email = $state('');
   let loading = $state(false);
 
   async function loginAdmin() {
     loading = true;
     try {
-      await auth.login(password);
+      await auth.login(password, email || undefined);
       const user = await auth.me();
       $currentUser = user;
       goto('/dashboard');
@@ -42,15 +43,21 @@
         <div class="w-full border-t"></div>
       </div>
       <div class="relative flex justify-center text-sm">
-        <span class="px-2 bg-white text-gray-500">or admin login</span>
+        <span class="px-2 bg-white text-gray-500">or login with password</span>
       </div>
     </div>
 
     <form onsubmit={(e) => { e.preventDefault(); loginAdmin(); }} class="space-y-4">
       <input
+        type="email"
+        bind:value={email}
+        placeholder="Email (leave blank for admin)"
+        class="w-full px-4 py-2 border rounded-lg"
+      />
+      <input
         type="password"
         bind:value={password}
-        placeholder="Admin password"
+        placeholder="Password"
         class="w-full px-4 py-2 border rounded-lg"
         required
       />
@@ -59,7 +66,7 @@
         disabled={loading}
         class="w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50"
       >
-        {loading ? 'Signing in...' : 'Admin Login'}
+        {loading ? 'Signing in...' : 'Sign in'}
       </button>
     </form>
   </div>

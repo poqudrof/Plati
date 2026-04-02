@@ -27,11 +27,15 @@ func main() {
 	migrateOnly := flag.Bool("migrate", false, "run migrations and exit")
 	flag.Parse()
 
+	start := time.Now()
+	log.Println("starting plati...")
+
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	log.Printf("[%.1fs] config loaded", time.Since(start).Seconds())
 
 	// Open database
 	db, err := database.New(cfg.Database.Path)
@@ -39,11 +43,13 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 	defer db.Close()
+	log.Printf("[%.1fs] database opened", time.Since(start).Seconds())
 
 	// Run migrations
 	if err := database.Migrate(db); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	log.Printf("[%.1fs] migrations applied", time.Since(start).Seconds())
 	if *migrateOnly {
 		log.Println("migrations complete")
 		return
@@ -53,8 +59,11 @@ func main() {
 	pool := incus.NewPool()
 	var serverModels []models.Server
 	for _, srv := range cfg.Servers {
+		log.Printf("[%.1fs] connecting to Incus server %s (%s)...", time.Since(start).Seconds(), srv.Name, srv.Endpoint)
 		if err := pool.AddServer(srv.Name, srv.Endpoint, srv.TLSClientCert, srv.TLSClientKey); err != nil {
-			log.Printf("warning: failed to connect to Incus server %s: %v", srv.Name, err)
+			log.Printf("[%.1fs] warning: failed to connect to Incus server %s: %v", time.Since(start).Seconds(), srv.Name, err)
+		} else {
+			log.Printf("[%.1fs] connected to Incus server %s", time.Since(start).Seconds(), srv.Name)
 		}
 		serverModels = append(serverModels, models.Server{
 			Name:         srv.Name,
@@ -72,35 +81,43 @@ func main() {
 		if cfg.Server.Host == "0.0.0.0" {
 			redirectURL = fmt.Sprintf("http://localhost:%d/auth/callback", cfg.Server.Port)
 		}
+		log.Printf("[%.1fs] fetching Entra OIDC configuration...", time.Since(start).Seconds())
 		entraAuth, err = auth.NewEntraAuth(context.Background(), cfg.Auth.EntraClientID, cfg.Auth.EntraClientSecret, cfg.Auth.EntraTenantID, redirectURL)
 		if err != nil {
-			log.Printf("warning: Entra auth init failed: %v", err)
+			log.Printf("[%.1fs] warning: Entra auth init failed: %v", time.Since(start).Seconds(), err)
+		} else {
+			log.Printf("[%.1fs] Entra OIDC ready", time.Since(start).Seconds())
 		}
 	}
 
+	// Keys directory: {config_dir}/ssh_keys/
+	keysDir := filepath.Join(filepath.Dir(*configPath), "ssh_keys")
+
 	// Init services
-	userSvc, err := services.NewUserService(db, cfg.SecretEncryptionKey)
+	userSvc, err := services.NewUserService(db, cfg.SecretEncryptionKey, keysDir)
 	if err != nil {
 		log.Fatalf("init user service: %v", err)
 	}
 	templateSvc := services.NewTemplateService(db)
-	instanceSvc := services.NewInstanceService(db, pool, userSvc)
+	prefSvc := services.NewPreferencesService(db)
+	adminSvc := services.NewAdminSettingsService(db, userSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir)
 	serverSvc := services.NewServerService(db, pool)
-	managedKeySvc := services.NewManagedKeyService(db, userSvc)
+	managedKeySvc := services.NewManagedKeyService(db, userSvc, keysDir)
 
 	// Sync servers from config to DB
 	if err := serverSvc.SyncServers(serverModels); err != nil {
 		log.Printf("warning: sync servers: %v", err)
 	}
 
-	// Import default templates (resolve relative to config file location)
+	// Sync templates from YAML files on disk (resolve relative to config file location)
 	templatesDir := cfg.TemplatesDir
 	if templatesDir != "" && !filepath.IsAbs(templatesDir) {
 		templatesDir = filepath.Join(filepath.Dir(*configPath), templatesDir)
 	}
 	if templatesDir != "" {
-		if err := templateSvc.ImportFromDir(templatesDir); err != nil {
-			log.Printf("warning: import templates: %v", err)
+		if err := templateSvc.SyncFromDir(templatesDir); err != nil {
+			log.Printf("warning: sync templates: %v", err)
 		}
 	}
 
@@ -118,26 +135,30 @@ func main() {
 	templateHandler := handlers.NewTemplateHandler(templateSvc)
 	instanceHandler := handlers.NewInstanceHandler(instanceSvc, db)
 	serverHandler := handlers.NewServerHandler(serverSvc, pool)
-	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc)
+	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	managedKeyHandler := handlers.NewManagedKeyHandler(managedKeySvc)
 	healthHandler := handlers.NewHealthHandler(db)
 	setupHandler := handlers.NewSetupHandler(db, cfg, *configPath)
-	terminalHandler := handlers.NewTerminalHandler(db, pool)
+	terminalHandler := handlers.NewTerminalHandler(db, pool, instanceSvc.CreationLogs())
+	prefsHandler := handlers.NewPreferencesHandler(prefSvc)
+	adminSettingsHandler := handlers.NewAdminSettingsHandler(adminSvc)
 
 	// Build router
 	r := router.New(router.Deps{
-		AuthHandler:       authHandler,
-		UserHandler:       userHandler,
-		TemplateHandler:   templateHandler,
-		InstanceHandler:   instanceHandler,
-		ServerHandler:     serverHandler,
-		AdminHandler:      adminHandler,
-		ManagedKeyHandler: managedKeyHandler,
-		HealthHandler:     healthHandler,
-		SetupHandler:      setupHandler,
-		TerminalHandler:   terminalHandler,
-		JWTSecret:         cfg.Auth.JWTSecret,
-		FrontendURL:       cfg.Server.FrontendURL,
+		AuthHandler:          authHandler,
+		UserHandler:          userHandler,
+		TemplateHandler:      templateHandler,
+		InstanceHandler:      instanceHandler,
+		ServerHandler:        serverHandler,
+		AdminHandler:         adminHandler,
+		ManagedKeyHandler:    managedKeyHandler,
+		HealthHandler:        healthHandler,
+		SetupHandler:         setupHandler,
+		TerminalHandler:      terminalHandler,
+		PreferencesHandler:   prefsHandler,
+		AdminSettingsHandler: adminSettingsHandler,
+		JWTSecret:            cfg.Auth.JWTSecret,
+		FrontendURL:          cfg.Server.FrontendURL,
 	})
 
 	// Start server
@@ -151,7 +172,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Plati server starting on %s", addr)
+		log.Printf("[%.1fs] listening on %s", time.Since(start).Seconds(), addr)
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

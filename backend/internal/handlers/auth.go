@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/config"
@@ -26,6 +27,7 @@ func NewAuthHandler(db *sqlx.DB, cfg *config.Config, entraAuth *auth.EntraAuth) 
 
 func (h *AuthHandler) LoginAdmin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -33,18 +35,32 @@ func (h *AuthHandler) LoginAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// User login: email + password against per-user password_hash
+	if req.Email != "" {
+		user, err := queries.GetUserByEmail(h.db, req.Email)
+		if err != nil || !user.PasswordHash.Valid {
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+		if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)) != nil {
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+		h.setTokenCookie(w, user)
+		writeJSON(w, http.StatusOK, map[string]string{"message": "ok"})
+		return
+	}
+
+	// Admin login: global password from config
 	if !auth.CheckPassword(req.Password, h.cfg.Auth.AdminPasswordHash) {
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
-
-	// Get admin user
 	user, err := queries.GetUserByEmail(h.db, "admin@plati.local")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "admin user not found")
 		return
 	}
-
 	h.setTokenCookie(w, user)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "ok"})
 }

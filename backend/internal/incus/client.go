@@ -1,6 +1,7 @@
 package incus
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -203,6 +204,30 @@ func (c *Client) DetachVolume(instanceName, deviceName string) error {
 	return op.Wait()
 }
 
+func (c *Client) UpdateInstanceConfig(name string, config map[string]string) error {
+	inst, etag, err := c.server.GetInstance(name)
+	if err != nil {
+		return fmt.Errorf("get instance for config update: %w", err)
+	}
+
+	if inst.Config == nil {
+		inst.Config = map[string]string{}
+	}
+	for k, v := range config {
+		if v == "" {
+			delete(inst.Config, k)
+		} else {
+			inst.Config[k] = v
+		}
+	}
+
+	op, err := c.server.UpdateInstance(name, inst.Writable(), etag)
+	if err != nil {
+		return fmt.Errorf("update instance config: %w", err)
+	}
+	return op.Wait()
+}
+
 func (c *Client) ListImages() ([]incusapi.Image, error) {
 	images, err := c.server.GetImages()
 	if err != nil {
@@ -240,6 +265,97 @@ func (c *Client) ExecInstance(name string, command []string, env map[string]stri
 
 	<-args.DataDone
 	return nil
+}
+
+// RunCommand executes a command in a non-interactive session and returns combined stdout+stderr.
+func (c *Client) RunCommand(name string, command []string) (string, error) {
+	pr, pw := io.Pipe()
+
+	req := incusapi.InstanceExecPost{
+		Command:     command,
+		WaitForWS:   true,
+		Interactive: false,
+		Environment: map[string]string{},
+	}
+
+	dataDone := make(chan bool)
+	args := &incusclient.InstanceExecArgs{
+		Stdin:    io.NopCloser(bytes.NewReader(nil)),
+		Stdout:   pw,
+		Stderr:   pw,
+		DataDone: dataDone,
+	}
+
+	op, err := c.server.ExecInstance(name, req, args)
+	if err != nil {
+		pr.Close()
+		pw.Close()
+		return "", fmt.Errorf("exec %s: %w", name, err)
+	}
+
+	outCh := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(pr)
+		outCh <- data
+	}()
+
+	opErr := op.Wait()
+	<-dataDone
+	pw.Close()
+	out := <-outCh
+
+	if opErr != nil {
+		return string(out), fmt.Errorf("exec wait %s: %w", name, opErr)
+	}
+	return string(out), nil
+}
+
+// StreamCommand runs a command in a non-interactive session and returns its stdout as a
+// streaming io.ReadCloser. The caller must close the reader when done.
+func (c *Client) StreamCommand(name string, command []string) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+
+	req := incusapi.InstanceExecPost{
+		Command:     command,
+		WaitForWS:   true,
+		Interactive: false,
+		Environment: map[string]string{},
+	}
+
+	dataDone := make(chan bool)
+	args := &incusclient.InstanceExecArgs{
+		Stdin:    io.NopCloser(bytes.NewReader(nil)),
+		Stdout:   pw,
+		Stderr:   pw, // discard stderr by sending to same pipe (acceptable for streaming use)
+		DataDone: dataDone,
+	}
+
+	op, err := c.server.ExecInstance(name, req, args)
+	if err != nil {
+		pr.Close()
+		pw.Close()
+		return nil, fmt.Errorf("stream exec %s: %w", name, err)
+	}
+
+	// Close the write side when the operation finishes.
+	go func() {
+		op.Wait()
+		<-dataDone
+		pw.Close()
+	}()
+
+	return pr, nil
+}
+
+func (c *Client) PushFile(instanceName, remotePath string, content []byte, uid, gid int64, mode int) error {
+	args := incusclient.InstanceFileArgs{
+		Content: bytes.NewReader(content),
+		UID:     uid,
+		GID:     gid,
+		Mode:    mode,
+		Type:    "file",
+	}
+	return c.server.CreateInstanceFile(instanceName, remotePath, args)
 }
 
 func (c *Client) GetServerResources() (*incusapi.Resources, error) {

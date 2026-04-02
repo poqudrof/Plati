@@ -1,7 +1,7 @@
 name: Python Development
 slug: python-dev
 description: Python 3.12 development environment with common tools
-image: images:ubuntu/24.04
+image: images:ubuntu/24.04/cloud
 profiles:
   - default
 resources:
@@ -20,3 +20,15 @@ cloud_init: |
   runcmd:
     - update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
     - pip install poetry
+
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 20GB
+      pool: default
+
+first_init_commands: []
+
+rebuild_commands:
+  - cd /workspace && git pull --ff-only 2>/dev/null || true

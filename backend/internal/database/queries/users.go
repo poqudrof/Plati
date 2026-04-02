@@ -49,6 +49,17 @@ func CreateUser(db *sqlx.DB, email, name, role string, entraID *string) (int64, 
 	return res.LastInsertId()
 }
 
+func CreateUserWithPassword(db *sqlx.DB, email, name, role, passwordHash string) (int64, error) {
+	res, err := db.Exec(
+		"INSERT INTO users (email, name, role, password_hash) VALUES (?, ?, ?, ?)",
+		email, name, role, passwordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
 func UpdateUser(db *sqlx.DB, id int64, name, role string) error {
 	_, err := db.Exec(
 		"UPDATE users SET name = ?, role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

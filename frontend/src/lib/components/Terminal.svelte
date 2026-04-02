@@ -1,7 +1,12 @@
 <script lang="ts">
   import { browser } from '$app/environment';
 
-  let { instanceId }: { instanceId: number } = $props();
+  let {
+    instanceId,
+    user = 'root',
+    label = '',
+    wsUrl = ''
+  }: { instanceId: number; user?: string; label?: string; wsUrl?: string } = $props();
 
   let terminalEl: HTMLDivElement | undefined = $state();
   let connected = $state(false);
@@ -11,6 +16,10 @@
   let term: any = null;
   let fitAddon: any = null;
   let resizeObserver: ResizeObserver | null = null;
+
+  // Visual context: root gets an amber badge, other users get a green badge
+  let isRoot = $derived(user === 'root');
+  let displayLabel = $derived(label || (isRoot ? 'root' : user));
 
   async function connect() {
     if (!browser || !terminalEl) return;
@@ -39,9 +48,9 @@
     fitAddon.fit();
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/api/v1/instances/${instanceId}/terminal`;
+    const computedUrl = `${proto}//${window.location.host}/api/v1/instances/${instanceId}/terminal?user=${encodeURIComponent(user)}`;
 
-    ws = new WebSocket(wsUrl);
+    ws = new WebSocket(wsUrl || computedUrl);
 
     ws.onopen = () => {
       connected = true;
@@ -85,7 +94,6 @@
     connected = false;
   }
 
-  // Cleanup on component destroy using $effect
   $effect(() => {
     return () => {
       resizeObserver?.disconnect();
@@ -95,20 +103,30 @@
   });
 </script>
 
-<div class="space-y-3">
-  <div class="flex items-center gap-3">
+<div class="space-y-2">
+  <div class="flex items-center gap-2">
+    <!-- Context badge -->
+    <span class="px-2 py-0.5 rounded text-xs font-mono font-semibold
+      {isRoot ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-green-100 text-green-800 border border-green-300'}">
+      {displayLabel}
+    </span>
+
     {#if !connected}
       <button onclick={connect}
-        class="px-4 py-2 bg-gray-800 text-green-400 rounded hover:bg-gray-700 font-mono text-sm">
+        class="px-3 py-1.5 rounded text-sm font-medium
+          {isRoot
+            ? 'bg-gray-800 text-amber-400 hover:bg-gray-700 border border-amber-900/40'
+            : 'bg-gray-800 text-green-400 hover:bg-gray-700 border border-green-900/40'}">
         Open Terminal
       </button>
     {:else}
       <button onclick={disconnect}
-        class="px-4 py-2 bg-red-700 text-white rounded hover:bg-red-600 text-sm">
-        Close Terminal
+        class="px-3 py-1.5 bg-red-700 text-white rounded hover:bg-red-600 text-sm">
+        Close
       </button>
       <span class="text-xs text-green-600 font-medium">Connected</span>
     {/if}
+
     {#if error}
       <span class="text-xs text-red-600">{error}</span>
     {/if}

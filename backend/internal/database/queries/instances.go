@@ -63,6 +63,14 @@ func UpdateInstanceIP(db *sqlx.DB, id int64, ip string) error {
 	return err
 }
 
+func UpdateInstanceCreationLog(db *sqlx.DB, id int64, log string) error {
+	_, err := db.Exec(
+		"UPDATE instances SET creation_log = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		log, id,
+	)
+	return err
+}
+
 func UpdateInstanceLastActive(db *sqlx.DB, id int64) error {
 	_, err := db.Exec(
 		"UPDATE instances SET last_active_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

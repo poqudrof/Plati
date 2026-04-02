@@ -1,0 +1,13 @@
+name: Tailscale
+slug: tailscale
+description: System container with Tailscale VPN. Requires the 'tailscale' Incus profile (see scripts/setup-tailscale-profile.sh). Add a secret named TAILSCALE_AUTH_KEY to auto-join on boot.
+image: images:ubuntu/24.04
+profiles:
+  - default
+  - tailscale
+resources:
+  cpu: 1
+  memory: 512MB
+  disk: 5GB
+includes:
+  - tailscale

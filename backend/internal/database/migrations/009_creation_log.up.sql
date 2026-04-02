@@ -1,0 +1,1 @@
+ALTER TABLE instances ADD COLUMN creation_log TEXT NOT NULL DEFAULT '';

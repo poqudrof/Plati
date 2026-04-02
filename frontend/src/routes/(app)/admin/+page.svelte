@@ -4,7 +4,7 @@
   import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
-  let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' = $state('templates');
+  let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' = $state('templates');
   let templateList: Template[] = $state([]);
   let serverList: Server[] = $state([]);
   let userList: User[] = $state([]);
@@ -16,6 +16,7 @@
 
   // User editing
   let editingUser: { id: number; name: string; role: string } | null = $state(null);
+  let creatingUser: { email: string; name: string; password: string; isAdmin: boolean } | null = $state(null);
 
   // Managed SSH Keys
   let managedKeyList: ManagedSSHKey[] = $state([]);
@@ -91,6 +92,21 @@
     } catch (e: any) { addNotification('error', e.message); }
   }
 
+  async function createUser() {
+    if (!creatingUser) return;
+    try {
+      await admin.users.create(
+        creatingUser.email,
+        creatingUser.name,
+        creatingUser.password,
+        creatingUser.isAdmin ? 'admin' : 'user'
+      );
+      creatingUser = null;
+      await loadUsers();
+      addNotification('success', 'User created');
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
   function parseResources(resources: string): Record<string, string> {
     try { return JSON.parse(resources); } catch { return {}; }
   }
@@ -150,11 +166,56 @@
     addNotification('success', `${label} copied`);
   }
 
+  function parsePostCreateCommands(json: string): string {
+    try {
+      const cmds: string[] = JSON.parse(json || '[]');
+      return cmds.join('\n');
+    } catch { return ''; }
+  }
+
+  function serializePostCreateCommands(text: string): string {
+    const cmds = text.split('\n').filter(l => l.trim() !== '');
+    return JSON.stringify(cmds);
+  }
+
+  // Admin settings
+  let tailscaleConfigured = $state(false);
+  let tailscaleInput = $state('');
+  let savingTailscale = $state(false);
+
+  async function loadAdminSettings() {
+    try {
+      const res = await admin.settings.getTailscaleKey();
+      tailscaleConfigured = res.configured;
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function saveTailscaleKey() {
+    if (!tailscaleInput.trim()) return;
+    savingTailscale = true;
+    try {
+      await admin.settings.setTailscaleKey(tailscaleInput.trim());
+      tailscaleInput = '';
+      tailscaleConfigured = true;
+      addNotification('success', 'Platform Tailscale key saved');
+    } catch (e: any) { addNotification('error', e.message); } finally { savingTailscale = false; }
+  }
+
+  async function deleteTailscaleKey() {
+    if (!confirm('Remove the platform Tailscale auth key? Instances using it will not join Tailscale on next rebuild.')) return;
+    try {
+      await admin.settings.deleteTailscaleKey();
+      tailscaleConfigured = false;
+      addNotification('success', 'Platform Tailscale key removed');
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
   if (browser) {
     loadTemplates();
     loadServers();
     loadUsers();
     loadManagedKeys();
+    loadAdminSettings();
   }
 </script>
 
@@ -166,6 +227,7 @@
     <button onclick={() => tab = 'servers'} class="pb-2 px-1 {tab === 'servers' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Servers</button>
     <button onclick={() => tab = 'users'} class="pb-2 px-1 {tab === 'users' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Users</button>
     <button onclick={() => tab = 'ssh-keys'} class="pb-2 px-1 {tab === 'ssh-keys' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">SSH Keys</button>
+    <button onclick={() => tab = 'settings'} class="pb-2 px-1 {tab === 'settings' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Settings</button>
   </div>
 
   <!-- Templates Tab -->
@@ -197,6 +259,7 @@
               <button onclick={() => expandedTemplate = expandedTemplate === tmpl.id ? null : tmpl.id} class="text-gray-500 hover:text-gray-700 text-sm">
                 {expandedTemplate === tmpl.id ? 'Collapse' : 'Details'}
               </button>
+              <a href="/admin/templates/{tmpl.id}/debug" class="text-purple-600 hover:text-purple-800 text-sm">Debug</a>
               <button onclick={() => startEditTemplate(tmpl)} class="text-indigo-600 hover:text-indigo-800 text-sm">Edit</button>
               <button onclick={() => deleteTemplate(tmpl.id)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
             </div>
@@ -295,8 +358,53 @@
     </div>
   {/if}
 
+  <!-- Settings Tab -->
+  {#if tab === 'settings'}
+    <div class="space-y-4">
+      <div class="bg-white border rounded-lg p-4">
+        <h3 class="font-medium mb-1">Tailscale Platform Auth Key</h3>
+        <p class="text-sm text-gray-500 mb-4">
+          This key is injected as <code class="bg-gray-100 px-1 rounded">TAILSCALE_AUTH_KEY</code> into instances
+          whose users have Tailscale mode set to <em>Platform key</em>. The value is encrypted at rest and never exposed in the UI.
+        </p>
+        <div class="flex items-center gap-2 mb-4">
+          <span class="text-sm font-medium">Status:</span>
+          {#if tailscaleConfigured}
+            <span class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">Configured</span>
+            <button onclick={deleteTailscaleKey} class="text-red-600 hover:text-red-800 text-sm ml-2">Remove</button>
+          {:else}
+            <span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-800">Not configured</span>
+          {/if}
+        </div>
+        <div class="flex gap-3">
+          <input
+            bind:value={tailscaleInput}
+            type="password"
+            placeholder="tskey-auth-…"
+            class="flex-1 px-3 py-2 border rounded text-sm font-mono"
+          />
+          <button
+            onclick={saveTailscaleKey}
+            disabled={savingTailscale || !tailscaleInput.trim()}
+            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm whitespace-nowrap"
+          >
+            {tailscaleConfigured ? 'Replace Key' : 'Save Key'}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- Users Tab -->
   {#if tab === 'users'}
+    <div class="flex justify-end mb-3">
+      <button
+        onclick={() => creatingUser = { email: '', name: '', password: '', isAdmin: false }}
+        class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm"
+      >
+        Create User
+      </button>
+    </div>
     <div class="bg-white border rounded-lg overflow-hidden">
       <table class="w-full">
         <thead class="bg-gray-50">
@@ -495,8 +603,23 @@
             <input type="text" bind:value={editingTemplate.resources} class="w-full px-3 py-2 border rounded font-mono text-sm" />
           </div>
           <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Terminal User</label>
+            <input type="text" bind:value={editingTemplate.terminal_user} placeholder="e.g. ubuntu (leave empty for root only)" class="w-full px-3 py-2 border rounded text-sm" />
+          </div>
+          <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Cloud-Init</label>
             <textarea bind:value={editingTemplate.cloud_init} rows="8" class="w-full px-3 py-2 border rounded font-mono text-sm"></textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Post-create commands (one per line, run via Incus exec)</label>
+            <textarea
+              rows="4"
+              class="w-full px-3 py-2 border rounded font-mono text-sm"
+              placeholder="apk add --no-cache git&#10;mkdir -p /workspace"
+              value={parsePostCreateCommands(editingTemplate.post_create_commands)}
+              oninput={(e) => { editingTemplate!.post_create_commands = serializePostCreateCommands((e.target as HTMLTextAreaElement).value); }}
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">Each non-empty line is run as a separate shell command inside the instance.</p>
           </div>
           <div class="flex items-center gap-2">
             <input type="checkbox" bind:checked={editingTemplate.is_active} id="tmpl-active" />
@@ -506,6 +629,39 @@
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => editingTemplate = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
           <button onclick={saveTemplate} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Create User Modal -->
+{#if creatingUser}
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) creatingUser = null; }}>
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="p-6">
+        <h2 class="text-lg font-bold mb-4">Create User</h2>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" bind:value={creatingUser.email} class="w-full px-3 py-2 border rounded" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" bind:value={creatingUser.name} class="w-full px-3 py-2 border rounded" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input type="password" bind:value={creatingUser.password} class="w-full px-3 py-2 border rounded" />
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={creatingUser.isAdmin} id="create-user-admin" />
+            <label for="create-user-admin" class="text-sm font-medium text-gray-700">Admin</label>
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
+          <button onclick={() => creatingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
+          <button onclick={createUser} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Create</button>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 name: Transcription CATIE
 slug: transcription-catie
 description: Container système pour le service de transcription audio (Whisper + pyannote)
-image: images:ubuntu/24.04
+image: images:ubuntu/24.04/cloud
 profiles:
   - default
 resources:

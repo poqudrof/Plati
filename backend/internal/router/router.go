@@ -10,18 +10,20 @@ import (
 )
 
 type Deps struct {
-	AuthHandler       *handlers.AuthHandler
-	UserHandler       *handlers.UserHandler
-	TemplateHandler   *handlers.TemplateHandler
-	InstanceHandler   *handlers.InstanceHandler
-	ServerHandler     *handlers.ServerHandler
-	AdminHandler      *handlers.AdminHandler
-	ManagedKeyHandler *handlers.ManagedKeyHandler
-	HealthHandler     *handlers.HealthHandler
-	SetupHandler      *handlers.SetupHandler
-	TerminalHandler   *handlers.TerminalHandler
-	JWTSecret         string
-	FrontendURL       string
+	AuthHandler          *handlers.AuthHandler
+	UserHandler          *handlers.UserHandler
+	TemplateHandler      *handlers.TemplateHandler
+	InstanceHandler      *handlers.InstanceHandler
+	ServerHandler        *handlers.ServerHandler
+	AdminHandler         *handlers.AdminHandler
+	ManagedKeyHandler    *handlers.ManagedKeyHandler
+	HealthHandler        *handlers.HealthHandler
+	SetupHandler         *handlers.SetupHandler
+	TerminalHandler      *handlers.TerminalHandler
+	PreferencesHandler   *handlers.PreferencesHandler
+	AdminSettingsHandler *handlers.AdminSettingsHandler
+	JWTSecret            string
+	FrontendURL          string
 }
 
 func New(deps Deps) *chi.Mux {
@@ -57,10 +59,19 @@ func New(deps Deps) *chi.Mux {
 			// User profile
 			r.Get("/profile", deps.UserHandler.GetProfile)
 
-			// SSH keys (Plati-generated)
+			// User preferences
+			r.Get("/preferences", deps.PreferencesHandler.Get)
+			r.Put("/preferences", deps.PreferencesHandler.Update)
+
+			// SSH keys (user-provided public keys)
 			r.Get("/ssh-keys", deps.UserHandler.ListSSHKeys)
-			r.Post("/ssh-keys/generate", deps.UserHandler.GenerateSSHKey)
+			r.Post("/ssh-keys", deps.UserHandler.CreateSSHKey)
 			r.Delete("/ssh-keys/{id}", deps.UserHandler.DeleteSSHKey)
+
+			// User keys (Plati-generated keypairs)
+			r.Get("/user-keys", deps.UserHandler.ListUserKeys)
+			r.Post("/user-keys/generate", deps.UserHandler.GenerateUserKey)
+			r.Delete("/user-keys/{id}", deps.UserHandler.DeleteUserKey)
 
 			// Secrets
 			r.Get("/secrets", deps.UserHandler.ListSecrets)
@@ -81,7 +92,14 @@ func New(deps Deps) *chi.Mux {
 			r.Post("/instances/{id}/stop", deps.InstanceHandler.Stop)
 			r.Post("/instances/{id}/rebuild", deps.InstanceHandler.Rebuild)
 			r.Delete("/instances/{id}", deps.InstanceHandler.Delete)
+			r.Get("/instances/{id}/stats", deps.InstanceHandler.Stats)
+			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
+			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
+			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)
+			r.Get("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeStatus)
+			r.Delete("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeOff)
 			r.Get("/instances/{id}/terminal", deps.TerminalHandler.Connect)
+			r.Get("/instances/{id}/creation-stream", deps.TerminalHandler.CreationStream)
 
 			// Instance secrets
 			r.Get("/instances/{id}/secrets", deps.InstanceHandler.ListSecrets)
@@ -98,6 +116,12 @@ func New(deps Deps) *chi.Mux {
 				r.Put("/templates/{id}", deps.TemplateHandler.Update)
 				r.Delete("/templates/{id}", deps.TemplateHandler.Delete)
 				r.Post("/templates/import", deps.TemplateHandler.Import)
+				r.Get("/templates/mixins", deps.TemplateHandler.ListMixins)
+				r.Post("/templates/{id}/debug", deps.AdminHandler.DebugCreateInstance)
+				r.Post("/templates/{id}/duplicate", deps.TemplateHandler.Duplicate)
+				r.Get("/templates/{id}/export-yaml", deps.TemplateHandler.ExportYAMLAsJSON)
+				r.Post("/templates/{id}/update-from-yaml", deps.TemplateHandler.UpdateFromYAML)
+				r.Get("/templates/{id}/debug/instance", deps.AdminHandler.GetDebugInstance)
 
 				// Servers
 				r.Get("/servers", deps.ServerHandler.List)
@@ -107,6 +131,7 @@ func New(deps Deps) *chi.Mux {
 
 				// Users
 				r.Get("/users", deps.AdminHandler.ListUsers)
+				r.Post("/users", deps.AdminHandler.CreateUser)
 				r.Put("/users/{id}", deps.AdminHandler.UpdateUser)
 				r.Delete("/users/{id}", deps.AdminHandler.DeleteUser)
 
@@ -121,6 +146,15 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/instances", deps.AdminHandler.ListAllInstances)
 				r.Post("/instances", deps.AdminHandler.CreateInstanceForUser)
 				r.Get("/instances/{id}/incus-info", deps.InstanceHandler.IncusDetail)
+				r.Put("/instances/{id}/incus-config", deps.InstanceHandler.UpdateIncusConfig)
+				r.Get("/instances/{id}/debug-logs", deps.TerminalHandler.DebugLogs)
+				r.Post("/instances/{id}/exec", deps.AdminHandler.ExecCommand)
+				r.Post("/instances/{id}/reapply-setup", deps.AdminHandler.ReapplySetup)
+
+				// Admin settings
+				r.Get("/settings/tailscale-key", deps.AdminSettingsHandler.GetTailscaleKey)
+				r.Put("/settings/tailscale-key", deps.AdminSettingsHandler.SetTailscaleKey)
+				r.Delete("/settings/tailscale-key", deps.AdminSettingsHandler.DeleteTailscaleKey)
 			})
 		})
 	})

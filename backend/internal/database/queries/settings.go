@@ -16,3 +16,8 @@ func SetSetting(db *sqlx.DB, key, value string) error {
 	)
 	return err
 }
+
+func DeleteSetting(db *sqlx.DB, key string) error {
+	_, err := db.Exec("DELETE FROM settings WHERE key = ?", key)
+	return err
+}

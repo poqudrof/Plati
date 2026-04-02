@@ -26,9 +26,53 @@ func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// SSH Keys (Plati-generated)
+// SSH Keys (user-provided public keys)
 
 func (h *UserHandler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	keys, err := h.svc.ListSSHKeys(user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list keys")
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+func (h *UserHandler) CreateSSHKey(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	var req struct {
+		Name      string `json:"name"`
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.PublicKey == "" {
+		writeError(w, http.StatusBadRequest, "name and public_key required")
+		return
+	}
+	key, err := h.svc.CreateSSHKey(user.ID, req.Name, req.PublicKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add key")
+		return
+	}
+	writeJSON(w, http.StatusCreated, key)
+}
+
+func (h *UserHandler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := h.svc.DeleteSSHKey(id, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete key")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// User Keys (Plati-generated keypairs)
+
+func (h *UserHandler) ListUserKeys(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	keys, err := h.svc.ListUserSSHKeys(user.ID)
 	if err != nil {
@@ -38,9 +82,9 @@ func (h *UserHandler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, keys)
 }
 
-// GenerateSSHKey generates a new Plati keypair for the user.
+// GenerateUserKey generates a new Plati keypair for the user.
 // The private key PEM is returned only in this response — it is not accessible later.
-func (h *UserHandler) GenerateSSHKey(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) GenerateUserKey(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	var req struct {
 		Name string `json:"name"`
@@ -63,7 +107,7 @@ func (h *UserHandler) GenerateSSHKey(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *UserHandler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) DeleteUserKey(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	id, err := parseID(r, "id")
 	if err != nil {

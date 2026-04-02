@@ -25,6 +25,15 @@ func GetVolume(db *sqlx.DB, id int64) (*models.Volume, error) {
 	return &v, nil
 }
 
+func GetVolumeByName(db *sqlx.DB, name string) (*models.Volume, error) {
+	var v models.Volume
+	err := db.Get(&v, "SELECT * FROM volumes WHERE name = ?", name)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
 func DeleteVolume(db *sqlx.DB, id int64) error {
 	_, err := db.Exec("DELETE FROM volumes WHERE id = ?", id)
 	return err

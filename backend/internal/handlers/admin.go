@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/services"
 )
@@ -14,10 +17,37 @@ type AdminHandler struct {
 	db          *sqlx.DB
 	userSvc     *services.UserService
 	instanceSvc *services.InstanceService
+	templateSvc *services.TemplateService
 }
 
-func NewAdminHandler(db *sqlx.DB, userSvc *services.UserService, instanceSvc *services.InstanceService) *AdminHandler {
-	return &AdminHandler{db: db, userSvc: userSvc, instanceSvc: instanceSvc}
+func NewAdminHandler(db *sqlx.DB, userSvc *services.UserService, instanceSvc *services.InstanceService, templateSvc *services.TemplateService) *AdminHandler {
+	return &AdminHandler{db: db, userSvc: userSvc, instanceSvc: instanceSvc, templateSvc: templateSvc}
+}
+
+func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if req.Email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "email and password are required")
+		return
+	}
+	if req.Role != "admin" && req.Role != "user" {
+		req.Role = "user"
+	}
+	user, err := h.userSvc.CreateUser(req.Email, req.Name, req.Role, req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+	writeJSON(w, http.StatusCreated, user)
 }
 
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -83,10 +113,98 @@ func (h *AdminHandler) CreateInstanceForUser(w http.ResponseWriter, r *http.Requ
 	}
 	req.CreateInstanceRequest.UserID = req.UserID
 
-	inst, err := h.instanceSvc.Create(req.CreateInstanceRequest)
+	inst, err := h.instanceSvc.CreateAsync(req.CreateInstanceRequest)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, inst)
+}
+
+// DebugCreateInstance creates a temporary debug instance from a template (admin only).
+// If a previous debug instance exists for this template, it is deleted first.
+func (h *AdminHandler) DebugCreateInstance(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid template id")
+		return
+	}
+
+	if _, err := queries.GetTemplate(h.db, id); err != nil {
+		writeError(w, http.StatusNotFound, "template not found")
+		return
+	}
+
+	// Delete previous debug instance for this template (best-effort).
+	if prev, err := queries.GetLatestDebugInstanceForTemplate(h.db, id, user.ID); err == nil {
+		_ = h.instanceSvc.Delete(prev.ID, user.ID)
+	}
+
+	req := services.CreateInstanceRequest{
+		Name:              fmt.Sprintf("debug-%d-%d", id, time.Now().Unix()),
+		TemplateID:        id,
+		UserID:            user.ID,
+		SSHKeyModeOverride: "plati", // always inject the Plati private key for debug instances
+	}
+
+	inst, err := h.instanceSvc.CreateAsync(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, inst)
+}
+
+// GetDebugInstance returns the most recent debug instance for a template, or 404.
+func (h *AdminHandler) GetDebugInstance(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid template id")
+		return
+	}
+	inst, err := queries.GetLatestDebugInstanceForTemplate(h.db, id, user.ID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no debug instance found")
+		return
+	}
+	writeJSON(w, http.StatusOK, inst)
+}
+
+// ExecCommand runs a shell command inside a running instance (admin only).
+func (h *AdminHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance id")
+		return
+	}
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Command == "" {
+		writeError(w, http.StatusBadRequest, "command is required")
+		return
+	}
+	result, err := h.instanceSvc.ExecCommand(id, req.Command)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ReapplySetup re-runs SSH key + secrets setup on a running instance (admin only).
+func (h *AdminHandler) ReapplySetup(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid instance id")
+		return
+	}
+	result, err := h.instanceSvc.ReapplySetup(id)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

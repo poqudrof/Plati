@@ -1,0 +1,1 @@
+ALTER TABLE templates ADD COLUMN includes TEXT NOT NULL DEFAULT '[]';

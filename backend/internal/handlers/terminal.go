@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	gorillaWs "github.com/gorilla/websocket"
@@ -14,15 +15,18 @@ import (
 	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
+	"github.com/homaserver/plati/internal/models"
+	"github.com/homaserver/plati/internal/services"
 )
 
 type TerminalHandler struct {
-	db   *sqlx.DB
-	pool *incus.Pool
+	db           *sqlx.DB
+	pool         *incus.Pool
+	creationLogs *services.CreationLogManager
 }
 
-func NewTerminalHandler(db *sqlx.DB, pool *incus.Pool) *TerminalHandler {
-	return &TerminalHandler{db: db, pool: pool}
+func NewTerminalHandler(db *sqlx.DB, pool *incus.Pool, creationLogs *services.CreationLogManager) *TerminalHandler {
+	return &TerminalHandler{db: db, pool: pool, creationLogs: creationLogs}
 }
 
 var upgrader = gorillaWs.Upgrader{
@@ -44,7 +48,13 @@ func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := queries.GetInstanceByUser(h.db, id, user.ID)
+	// Admins can connect to any instance; regular users only their own.
+	var inst *models.Instance
+	if user.Role == "admin" {
+		inst, err = queries.GetInstance(h.db, id)
+	} else {
+		inst, err = queries.GetInstanceByUser(h.db, id, user.ID)
+	}
 	if err != nil {
 		http.Error(w, "instance not found", http.StatusNotFound)
 		return
@@ -52,6 +62,30 @@ func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	if inst.Status != "running" {
 		http.Error(w, "instance not running", http.StatusBadRequest)
 		return
+	}
+
+	// Determine which user to exec as. Default to root.
+	execUser := r.URL.Query().Get("user")
+	if execUser == "" {
+		execUser = "root"
+	}
+
+	// For regular users: only "root" or the template's configured terminal_user are allowed.
+	// Admins bypass this restriction.
+	if user.Role != "admin" && execUser != "root" {
+		tmpl, err := queries.GetTemplate(h.db, inst.TemplateID)
+		if err != nil || tmpl.TerminalUser == "" || tmpl.TerminalUser != execUser {
+			http.Error(w, "user not allowed", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Build the command: root gets /bin/bash directly; other users get su login shell.
+	var command []string
+	if execUser == "root" {
+		command = []string{"/bin/bash"}
+	} else {
+		command = []string{"su", "-", execUser}
 	}
 
 	server, err := queries.GetServer(h.db, inst.ServerID)
@@ -129,9 +163,208 @@ func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run exec — blocks until shell exits
-	err = client.ExecInstance(inst.IncusName, []string{"/bin/bash"}, map[string]string{"TERM": "xterm-256color"}, pr, bw, controlFn)
+	err = client.ExecInstance(inst.IncusName, command, map[string]string{"TERM": "xterm-256color"}, pr, bw, controlFn)
 	if err != nil {
 		log.Printf("exec error: %v", err)
+	}
+
+	once.Do(cleanup)
+}
+
+// CreationStream streams creation log lines for an instance via WebSocket.
+// Replays buffered lines immediately, then tails new ones until the goroutine
+// completes. Works for both in-progress and already-finished creations.
+func (h *TerminalHandler) CreationStream(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var inst *models.Instance
+	if user.Role == "admin" {
+		inst, err = queries.GetInstance(h.db, id)
+	} else {
+		inst, err = queries.GetInstanceByUser(h.db, id, user.ID)
+	}
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("creation-stream websocket upgrade: %v", err)
+		return
+	}
+	defer ws.Close()
+
+	send := func(text string) error {
+		return ws.WriteMessage(gorillaWs.TextMessage, []byte(text))
+	}
+
+	// If already done, replay stored log line-by-line and close.
+	if inst.Status != "creating" {
+		if inst.CreationLog != "" {
+			for _, line := range strings.Split(inst.CreationLog, "\n") {
+				if err := send(line + "\r\n"); err != nil {
+					return
+				}
+			}
+		}
+		_ = send("\r\n\x1b[32m[Instance ready]\x1b[0m\r\n")
+		return
+	}
+
+	existing, ch := h.creationLogs.Subscribe(id)
+
+	for _, line := range existing {
+		if err := send(line + "\r\n"); err != nil {
+			if ch != nil {
+				h.creationLogs.Unsubscribe(id, ch)
+			}
+			return
+		}
+	}
+
+	if ch == nil {
+		// Already completed between status check and subscribe.
+		_ = send("\r\n\x1b[32m[Instance ready]\x1b[0m\r\n")
+		return
+	}
+	defer h.creationLogs.Unsubscribe(id, ch)
+
+	// Discard browser input; signal disconnection via done channel.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case line, ok := <-ch:
+			if !ok {
+				_ = send("\r\n\x1b[32m[Instance ready]\x1b[0m\r\n")
+				return
+			}
+			if err := send(line + "\r\n"); err != nil {
+				return
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
+// DebugLogs streams the cloud-init output log for any instance (admin only).
+// It waits for the log file to appear then tails it from the beginning.
+func (h *TerminalHandler) DebugLogs(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	inst, err := queries.GetInstance(h.db, id)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+	if inst.Status != "running" {
+		http.Error(w, "instance not running", http.StatusBadRequest)
+		return
+	}
+
+	server, err := queries.GetServer(h.db, inst.ServerID)
+	if err != nil {
+		http.Error(w, "server not found", http.StatusInternalServerError)
+		return
+	}
+
+	client, err := h.pool.GetClient(server.Name)
+	if err != nil {
+		http.Error(w, "incus client not available", http.StatusInternalServerError)
+		return
+	}
+
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("debug-logs websocket upgrade: %v", err)
+		return
+	}
+	defer ws.Close()
+
+	pr, pw := io.Pipe()
+	br, bw := io.Pipe()
+
+	var once sync.Once
+	cleanup := func() {
+		pw.Close()
+		bw.Close()
+		pr.Close()
+		br.Close()
+	}
+
+	// Discard browser → backend input
+	go func() {
+		defer once.Do(cleanup)
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Incus stdout → browser WS
+	go func() {
+		defer once.Do(cleanup)
+		buf := make([]byte, 4096)
+		for {
+			n, err := br.Read(buf)
+			if n > 0 {
+				if wErr := ws.WriteMessage(gorillaWs.TextMessage, buf[:n]); wErr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Stream init logs: prefer journalctl (covers systemd + cloud-init), fall back to
+	// cloud-init output log and syslog if journalctl is absent.
+	logScript := `
+if command -v journalctl > /dev/null 2>&1; then
+    echo "=== Boot Journal ==="
+    journalctl -b --no-pager -o short-iso 2>/dev/null
+    echo ""
+    if [ -f /var/log/cloud-init-output.log ]; then
+        echo "=== cloud-init-output.log ==="
+        cat /var/log/cloud-init-output.log
+        echo ""
+    fi
+    echo "=== Following journal ==="
+    exec journalctl -b -f --no-pager -o short-iso 2>/dev/null
+else
+    echo "=== journalctl not found, trying log files ==="
+    cat /var/log/cloud-init-output.log 2>/dev/null || true
+    cat /var/log/cloud-init.log 2>/dev/null || true
+    exec tail -f /var/log/syslog /var/log/messages 2>/dev/null || echo "(no log source found)"
+fi
+`
+	command := []string{"bash", "-c", logScript}
+
+	controlFn2 := func(conn *incusWs.Conn) {}
+	err = client.ExecInstance(inst.IncusName, command, map[string]string{"TERM": "xterm-256color"}, pr, bw, controlFn2)
+	if err != nil {
+		log.Printf("debug-logs exec error: %v", err)
 	}
 
 	once.Do(cleanup)

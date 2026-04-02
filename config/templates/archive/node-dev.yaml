@@ -1,7 +1,7 @@
 name: Node.js Development
 slug: node-dev
 description: Node.js 22 LTS development environment with common tools
-image: images:ubuntu/24.04
+image: images:ubuntu/24.04/cloud
 profiles:
   - default
 resources:
@@ -18,3 +18,15 @@ cloud_init: |
     - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     - apt-get install -y nodejs
     - npm install -g pnpm
+
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 20GB
+      pool: default
+
+first_init_commands: []
+
+rebuild_commands:
+  - cd /workspace && git pull --ff-only 2>/dev/null || true

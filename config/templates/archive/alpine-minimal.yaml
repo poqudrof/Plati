@@ -1,0 +1,13 @@
+name: Alpine Minimal
+slug: alpine-minimal
+description: Bare Alpine Linux 3.20 with SSH key injection only
+image: images:alpine/3.20
+profiles:
+  - default
+resources:
+  cpu: 1
+  memory: 512MB
+  disk: 5GB
+
+persistence:
+  mode: ephemeral

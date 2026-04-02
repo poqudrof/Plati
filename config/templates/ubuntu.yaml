@@ -1,0 +1,24 @@
+name: Ubuntu
+slug: ubuntu
+description: Ubuntu 24.04 LTS dev environment.
+image: images:ubuntu/24.04/cloud
+profiles:
+  - default
+  - docker
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 20GB
+terminal_user: ubuntu
+includes:
+#  - tailscale
+#  - sshx
+  - docker
+#first_init_commands:
+#  - apt-get update -y
+#  - apt-get install -y git curl wget build-essential

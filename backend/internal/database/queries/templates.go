@@ -36,9 +36,10 @@ func GetTemplateBySlug(db *sqlx.DB, slug string) (*models.Template, error) {
 
 func CreateTemplate(db *sqlx.DB, t *models.Template) (int64, error) {
 	res, err := db.Exec(
-		`INSERT INTO templates (name, slug, description, image, profiles, resources, cloud_init, is_active)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.CloudInit, t.IsActive,
+		`INSERT INTO templates (name, slug, description, image, profiles, resources, cloud_init, terminal_user, post_create_commands, persistence_mode, persistence_dirs, first_init_commands, rebuild_commands, includes, is_active)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.CloudInit, t.TerminalUser, t.PostCreateCommands,
+		t.PersistenceMode, t.PersistenceDirs, t.FirstInitCommands, t.RebuildCommands, t.Includes, t.IsActive,
 	)
 	if err != nil {
 		return 0, err
@@ -48,9 +49,10 @@ func CreateTemplate(db *sqlx.DB, t *models.Template) (int64, error) {
 
 func UpdateTemplate(db *sqlx.DB, t *models.Template) error {
 	_, err := db.Exec(
-		`UPDATE templates SET name = ?, slug = ?, description = ?, image = ?, profiles = ?, resources = ?, cloud_init = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+		`UPDATE templates SET name = ?, slug = ?, description = ?, image = ?, profiles = ?, resources = ?, cloud_init = ?, terminal_user = ?, post_create_commands = ?, persistence_mode = ?, persistence_dirs = ?, first_init_commands = ?, rebuild_commands = ?, includes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ?`,
-		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.CloudInit, t.IsActive, t.ID,
+		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.CloudInit, t.TerminalUser, t.PostCreateCommands,
+		t.PersistenceMode, t.PersistenceDirs, t.FirstInitCommands, t.RebuildCommands, t.Includes, t.IsActive, t.ID,
 	)
 	return err
 }
@@ -58,4 +60,16 @@ func UpdateTemplate(db *sqlx.DB, t *models.Template) error {
 func DeleteTemplate(db *sqlx.DB, id int64) error {
 	_, err := db.Exec("DELETE FROM templates WHERE id = ?", id)
 	return err
+}
+
+func GetLatestDebugInstanceForTemplate(db *sqlx.DB, templateID, userID int64) (*models.Instance, error) {
+	var inst models.Instance
+	err := db.Get(&inst,
+		`SELECT * FROM instances WHERE template_id = ? AND user_id = ? AND name LIKE 'debug-%' ORDER BY created_at DESC LIMIT 1`,
+		templateID, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &inst, nil
 }

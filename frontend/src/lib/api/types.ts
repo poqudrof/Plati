@@ -76,8 +76,41 @@ export interface Template {
   profiles: string;
   resources: string;
   cloud_init: string;
+  /** Non-root login user for the second terminal button. Empty = root only. */
+  terminal_user: string;
+  /** JSON array of shell commands run via incus exec after instance starts (deprecated). */
+  post_create_commands: string;
+  /** "normal" | "ephemeral" */
+  persistence_mode: string;
+  /** JSON array of {path, size, pool} objects */
+  persistence_dirs: string;
+  /** JSON array of commands run only on first create */
+  first_init_commands: string;
+  /** JSON array of commands run on rebuild */
+  rebuild_commands: string;
+  /** JSON array of mixin names included by this template */
+  includes: string;
   is_active: boolean;
   created_at: string;
+  updated_at: string;
+}
+
+export interface MixinInfo {
+  name: string;
+  commands: string[];
+}
+
+export interface ExecResult {
+  output: string;
+  error?: string;
+}
+
+export interface UserPreferences {
+  user_id: number;
+  /** "plati" | "personal" */
+  ssh_key_mode: string;
+  /** "plati" | "personal" */
+  tailscale_mode: string;
   updated_at: string;
 }
 
@@ -91,9 +124,30 @@ export interface Instance {
   incus_name: string;
   status: 'creating' | 'running' | 'stopped' | 'error';
   ip_address: string | null;
+  creation_log: string;
   last_active_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface InstanceStats {
+  has_git: boolean;
+  git_modified: number;
+  disk_used: string;
+}
+
+export interface SshxURLResult {
+  url: string;
+}
+
+export interface TailscaleServeRequest {
+  port: number;
+}
+
+export interface TailscaleServeResult {
+  status: string;
+  url: string;
+  port: number;
 }
 
 export interface InstanceSecret {
@@ -122,12 +176,29 @@ export interface IncusDetail {
   profiles: string[];
   limits_cpu: string;
   limits_memory: string;
+  limits_memory_swap: string;
+  limits_processes: string;
+  boot_autostart: string;
+  boot_autostart_delay: string;
+  security_nesting: string;
+  security_privileged: string;
   cpu_usage_ns: number;
   memory_usage: number;
   memory_peak: number;
   processes: number;
   network: Record<string, IncusNetworkInterface>;
   disk_usage: Record<string, number>;
+}
+
+export interface IncusConfigUpdate {
+  limits_cpu: string;
+  limits_memory: string;
+  limits_memory_swap: string;
+  limits_processes: string;
+  boot_autostart: string;
+  boot_autostart_delay: string;
+  security_nesting: string;
+  security_privileged: string;
 }
 
 export interface ImageSummary {

@@ -9,9 +9,13 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/homaserver/plati/internal/database/queries"
@@ -42,15 +46,16 @@ func generateSSHKeypair() (string, string, error) {
 type UserService struct {
 	db            *sqlx.DB
 	encryptionKey []byte
+	keysDir       string
 }
 
-func NewUserService(db *sqlx.DB, encryptionKeyHex string) (*UserService, error) {
+func NewUserService(db *sqlx.DB, encryptionKeyHex string, keysDir string) (*UserService, error) {
 	key, err := hex.DecodeString(encryptionKeyHex)
 	if err != nil || len(key) != 32 {
 		// Use a zero key if not configured (dev mode)
 		key = make([]byte, 32)
 	}
-	return &UserService{db: db, encryptionKey: key}, nil
+	return &UserService{db: db, encryptionKey: key, keysDir: keysDir}, nil
 }
 
 func (s *UserService) GetUser(id int64) (*models.User, error) {
@@ -65,8 +70,38 @@ func (s *UserService) UpdateUser(id int64, name, role string) error {
 	return queries.UpdateUser(s.db, id, name, role)
 }
 
+func (s *UserService) CreateUser(email, name, role, password string) (*models.User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+	id, err := queries.CreateUserWithPassword(s.db, email, name, role, string(hash))
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	return queries.GetUserByID(s.db, id)
+}
+
 func (s *UserService) DeleteUser(id int64) error {
 	return queries.DeleteUser(s.db, id)
+}
+
+// User-provided SSH public keys
+
+func (s *UserService) ListSSHKeys(userID int64) ([]models.SSHKey, error) {
+	return queries.ListSSHKeys(s.db, userID)
+}
+
+func (s *UserService) CreateSSHKey(userID int64, name, publicKey string) (*models.SSHKey, error) {
+	id, err := queries.CreateSSHKey(s.db, userID, name, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	return &models.SSHKey{ID: id, UserID: userID, Name: name, PublicKey: publicKey}, nil
+}
+
+func (s *UserService) DeleteSSHKey(id, userID int64) error {
+	return queries.DeleteSSHKey(s.db, id, userID)
 }
 
 // Plati-generated SSH Keys
@@ -86,6 +121,15 @@ func (s *UserService) GenerateUserSSHKey(userID int64, name string) (*models.Use
 	if err != nil {
 		return nil, "", fmt.Errorf("save key: %w", err)
 	}
+	if s.keysDir != "" {
+		dir := filepath.Join(s.keysDir, fmt.Sprintf("user_%d", userID))
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			log.Printf("warning: create user key dir %s: %v", dir, err)
+		} else {
+			os.WriteFile(filepath.Join(dir, "id_rsa"), []byte(privateKeyPEM), 0600)
+			os.WriteFile(filepath.Join(dir, "id_rsa.pub"), []byte(publicKey), 0644)
+		}
+	}
 	key := &models.UserSSHKey{
 		ID:        id,
 		UserID:    userID,
@@ -100,7 +144,13 @@ func (s *UserService) ListUserSSHKeys(userID int64) ([]models.UserSSHKey, error)
 }
 
 func (s *UserService) DeleteUserSSHKey(id, userID int64) error {
-	return queries.DeleteUserSSHKey(s.db, id, userID)
+	if err := queries.DeleteUserSSHKey(s.db, id, userID); err != nil {
+		return err
+	}
+	if s.keysDir != "" {
+		os.RemoveAll(filepath.Join(s.keysDir, fmt.Sprintf("user_%d", userID)))
+	}
+	return nil
 }
 
 // Secrets (encrypted)

@@ -72,6 +72,11 @@ test.describe('Dashboard', () => {
   test('instances list', async ({ page }) => {
     await page.goto('/dashboard');
     await waitForContent(page);
+    // Wait for stats to resolve (async exec inside instances)
+    await page.waitForFunction(
+      () => !document.querySelector('.animate-pulse'),
+      { timeout: 15_000 }
+    ).catch(() => {}); // ok if no stats to load
     await shot(page, '03-dashboard');
   });
 });
@@ -266,6 +271,50 @@ test.describe('Docs', () => {
 // ---------------------------------------------------------------------------
 // Notifications overlay
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// SSHX URL section
+// ---------------------------------------------------------------------------
+
+test.describe('SSHX URL section', () => {
+  test('sshx instance url display', async ({ page }) => {
+    const resp = await page.request.get('/api/v1/instances');
+    if (!resp.ok()) { test.skip(); return; }
+    const list = await resp.json();
+    const running = (Array.isArray(list) ? list : []).find((i: any) => i.status === 'running');
+    if (!running) { test.skip(); return; }
+    const urlResp = await page.request.get(`/api/v1/instances/${running.id}/sshx-url`);
+    if (!urlResp.ok()) { test.skip(); return; }
+    const { url } = await urlResp.json();
+    if (!url) { test.skip(); return; }
+
+    await page.goto(`/instances/${running.id}`);
+    await waitForContent(page);
+    const visible = await page.getByText('SSHX Collaborative Terminal').isVisible({ timeout: 3000 }).catch(() => false);
+    if (!visible) { test.skip(); return; }
+    await shot(page, '21-sshx-url-section');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tailscale Serve section
+// ---------------------------------------------------------------------------
+
+test.describe('Tailscale Serve section', () => {
+  test('tailscale serve controls visible', async ({ page }) => {
+    const resp = await page.request.get('/api/v1/instances');
+    if (!resp.ok()) { test.skip(); return; }
+    const list = await resp.json();
+    const running = (Array.isArray(list) ? list : []).find((i: any) => i.status === 'running');
+    if (!running) { test.skip(); return; }
+
+    await page.goto(`/instances/${running.id}`);
+    await waitForContent(page);
+    const visible = await page.getByText('Tailscale Serve').isVisible({ timeout: 3000 }).catch(() => false);
+    if (!visible) { test.skip(); return; }
+    await shot(page, '22-tailscale-serve-section');
+  });
+});
 
 test.describe('Notifications', () => {
   test('success toast', async ({ page }) => {

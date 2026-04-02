@@ -1,0 +1,1 @@
+ALTER TABLE templates ADD COLUMN terminal_user TEXT NOT NULL DEFAULT '';

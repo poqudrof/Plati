@@ -28,6 +28,15 @@ type IncusClient interface {
 
 	// Exec
 	ExecInstance(name string, command []string, env map[string]string, stdin io.ReadCloser, stdout io.WriteCloser, control func(conn *websocket.Conn)) error
+	RunCommand(name string, command []string) (string, error)
+	// StreamCommand runs a command and returns its stdout as a streaming reader (for piping).
+	StreamCommand(name string, command []string) (io.ReadCloser, error)
+
+	// Files
+	PushFile(instanceName, remotePath string, content []byte, uid, gid int64, mode int) error
+
+	// Config
+	UpdateInstanceConfig(name string, config map[string]string) error
 
 	// Server info
 	GetServerResources() (*incusapi.Resources, error)

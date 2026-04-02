@@ -1,0 +1,31 @@
+name: Docker Dev
+slug: docker-dev
+description: Ubuntu dev environment with Docker-in-Docker support. Requires the 'docker' Incus profile (see scripts/setup-docker-profile.sh).
+image: images:ubuntu/24.04/cloud
+profiles:
+  - default
+  - docker
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+cloud_init: |
+  #cloud-config
+  write_files:
+    - path: /etc/docker/daemon.json
+      content: |
+        {
+          "storage-driver": "vfs"
+        }
+  runcmd:
+    - apt-get update -y
+    - apt-get install -y ca-certificates curl
+    - install -m 0755 -d /etc/apt/keyrings
+    - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    - chmod a+r /etc/apt/keyrings/docker.asc
+    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+    - apt-get update
+    - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    - systemctl daemon-reload
+    - systemctl enable docker
+    - systemctl start docker

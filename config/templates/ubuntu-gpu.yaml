@@ -1,0 +1,26 @@
+name: Ubuntu GPU
+slug: ubuntu-gpu
+description: Ubuntu 24.04 LTS with Docker and Nvidia GPU passthrough.
+image: images:ubuntu/24.04/cloud
+profiles:
+  - default
+  - docker
+  - nvidia
+resources:
+  cpu: 4
+  memory: 8GB
+  disk: 40GB
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 40GB
+terminal_user: ubuntu
+includes:
+  - tailscale
+  - sshx
+  - docker
+  - nvidia
+first_init_commands:
+  - apt-get update -y
+  - apt-get install -y git curl wget build-essential

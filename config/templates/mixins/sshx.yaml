@@ -1,0 +1,11 @@
+name: SSHX mixin
+files:
+  - src: sshx.service
+    dest: /etc/systemd/system/sshx.service
+    mode: "0644"
+post_create_commands:
+  - apt-get install -y -q curl
+  - curl -sSf https://sshx.io/get | sh
+  - systemctl daemon-reload
+  - systemctl enable sshx
+  - systemctl start sshx
