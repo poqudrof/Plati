@@ -6,8 +6,13 @@ set -euo pipefail
 #
 # Usage: ./scripts/test-api-lifecycle.sh [BASE_URL] [ADMIN_PASSWORD]
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../.env
+[ -f "$SCRIPT_DIR/../.env" ] && source "$SCRIPT_DIR/../.env"
+
 BASE_URL="${1:-http://localhost:8080}"
-ADMIN_PASSWORD="${2:-admin123}"
+ADMIN_PASSWORD="${2:-${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env or pass as arg}}"
+TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:?Set TAILSCALE_AUTH_KEY in .env}"
 COOKIE_JAR=$(mktemp)
 
 trap "rm -f $COOKIE_JAR" EXIT
@@ -80,14 +85,25 @@ else
     fail "No templates found. Import templates first."
 fi
 
+# -- Seed TAILSCALE_AUTH_KEY secret --------------------------------
+echo "5. Seed TAILSCALE_AUTH_KEY secret"
+TAILSCALE_KEY="$TAILSCALE_AUTH_KEY"
+SECRET_RESULT=$(api POST /api/v1/secrets -d "{\"name\":\"TAILSCALE_AUTH_KEY\",\"value\":\"$TAILSCALE_KEY\"}")
+SECRET_ID=$(echo "$SECRET_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [ -n "$SECRET_ID" ]; then
+    pass "TAILSCALE_AUTH_KEY secret created (id=$SECRET_ID)"
+else
+    fail "Failed to create TAILSCALE_AUTH_KEY: $SECRET_RESULT"
+fi
+
 # -- List Instances (should be empty) -----------------------------
-echo "5. List instances (before create)"
+echo "6. List instances (before create)"
 INSTANCES=$(api GET /api/v1/instances)
 INST_COUNT=$(echo "$INSTANCES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 pass "Found $INST_COUNT instances"
 
 # -- Create Instance ----------------------------------------------
-echo "6. Create instance"
+echo "7. Create instance"
 INSTANCE_NAME="test-lifecycle-$(date +%s)"
 CREATE_RESULT=$(api POST /api/v1/instances -d "{\"name\":\"$INSTANCE_NAME\",\"template_id\":$TEMPLATE_ID}")
 INST_ID=$(echo "$CREATE_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || echo "")
@@ -112,7 +128,7 @@ else
 fi
 
 # -- Get Instance Detail ------------------------------------------
-echo "7. Get instance detail"
+echo "8. Get instance detail"
 DETAIL=$(api GET "/api/v1/instances/$INST_ID")
 DETAIL_NAME=$(echo "$DETAIL" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])" 2>/dev/null || echo "")
 if [ "$DETAIL_NAME" = "$INSTANCE_NAME" ]; then
@@ -122,7 +138,7 @@ else
 fi
 
 # -- Verify in Incus (if incus CLI available) ---------------------
-echo "8. Verify in Incus"
+echo "9. Verify in Incus"
 if command -v incus >/dev/null 2>&1 && [ -n "$INCUS_NAME" ]; then
     INCUS_STATUS=$(incus info "$INCUS_NAME" 2>/dev/null | grep "Status:" | awk '{print $2}' || echo "unknown")
     if [ "$INCUS_STATUS" = "RUNNING" ] || [ "$INCUS_STATUS" = "Running" ]; then
@@ -142,8 +158,45 @@ else
     info "Incus CLI not available or no incus_name - skipping direct verification"
 fi
 
+# -- Verify user disk listing -------------------------------------
+echo "9b. Verify user disk listing"
+DISKS=$(api GET /api/v1/disks)
+DISK_COUNT=$(echo "$DISKS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if d else 0)" 2>/dev/null || echo "0")
+if [ "$DISK_COUNT" -ge 1 ]; then
+    pass "User disk listing shows $DISK_COUNT disk(s)"
+    DISK_INSTANCE=$(echo "$DISKS" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['instance_name'])" 2>/dev/null || echo "")
+    DISK_MOUNT=$(echo "$DISKS" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['mount_path'])" 2>/dev/null || echo "")
+    DISK_SIZE=$(echo "$DISKS" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['size_gb'])" 2>/dev/null || echo "")
+    info "Disk: instance=$DISK_INSTANCE mount=$DISK_MOUNT size=${DISK_SIZE}GB"
+else
+    fail "Expected at least 1 disk, got $DISK_COUNT"
+fi
+
+# -- Verify admin disk listing ------------------------------------
+echo "9c. Verify admin disk listing"
+ADMIN_DISKS=$(api GET /api/v1/admin/disks)
+ADMIN_DISK_COUNT=$(echo "$ADMIN_DISKS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if d else 0)" 2>/dev/null || echo "0")
+if [ "$ADMIN_DISK_COUNT" -ge 1 ]; then
+    pass "Admin disk listing shows $ADMIN_DISK_COUNT disk(s)"
+else
+    fail "Admin disk listing empty"
+fi
+
+# -- Verify Incus storage volume ----------------------------------
+echo "9d. Verify Incus storage volume"
+if command -v incus >/dev/null 2>&1 && [ -n "$INCUS_NAME" ]; then
+    VOL_NAME="${INCUS_NAME}-workspace"
+    if incus storage volume list default --format csv 2>/dev/null | grep -q "$VOL_NAME"; then
+        pass "Storage volume $VOL_NAME exists in pool"
+    else
+        info "Volume $VOL_NAME not found in storage pool list"
+    fi
+else
+    info "Incus CLI not available - skipping volume verification"
+fi
+
 # -- Stop Instance ------------------------------------------------
-echo "9. Stop instance"
+echo "10. Stop instance"
 STOP_RESULT=$(api POST "/api/v1/instances/$INST_ID/stop")
 STOP_MSG=$(echo "$STOP_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
 if [ "$STOP_MSG" = "stopped" ]; then
@@ -153,7 +206,7 @@ else
 fi
 
 # -- Start Instance -----------------------------------------------
-echo "10. Start instance"
+echo "11. Start instance"
 START_RESULT=$(api POST "/api/v1/instances/$INST_ID/start")
 START_MSG=$(echo "$START_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
 if [ "$START_MSG" = "started" ]; then
@@ -163,7 +216,7 @@ else
 fi
 
 # -- Rebuild Instance ---------------------------------------------
-echo "11. Rebuild instance"
+echo "12. Rebuild instance"
 REBUILD_RESULT=$(api POST "/api/v1/instances/$INST_ID/rebuild")
 REBUILD_MSG=$(echo "$REBUILD_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
 if [ "$REBUILD_MSG" = "rebuilt" ]; then
@@ -173,7 +226,7 @@ else
 fi
 
 # -- Verify Instance After Rebuild --------------------------------
-echo "12. Verify instance after rebuild"
+echo "13. Verify instance after rebuild"
 DETAIL2=$(api GET "/api/v1/instances/$INST_ID")
 DETAIL2_STATUS=$(echo "$DETAIL2" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null || echo "")
 info "Instance status after rebuild: $DETAIL2_STATUS"
@@ -191,8 +244,18 @@ if command -v incus >/dev/null 2>&1 && [ -n "$INCUS_NAME" ]; then
     fi
 fi
 
+# -- Verify disks survived rebuild --------------------------------
+echo "13b. Verify disks after rebuild"
+DISKS_POST_REBUILD=$(api GET /api/v1/disks)
+DISK_COUNT_REBUILD=$(echo "$DISKS_POST_REBUILD" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if d else 0)" 2>/dev/null || echo "0")
+if [ "$DISK_COUNT_REBUILD" -ge 1 ]; then
+    pass "Disk listing preserved after rebuild ($DISK_COUNT_REBUILD disk(s))"
+else
+    fail "Expected at least 1 disk after rebuild, got $DISK_COUNT_REBUILD"
+fi
+
 # -- Delete Instance ----------------------------------------------
-echo "13. Delete instance"
+echo "14. Delete instance"
 DELETE_RESULT=$(api DELETE "/api/v1/instances/$INST_ID")
 DELETE_MSG=$(echo "$DELETE_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message',''))" 2>/dev/null || echo "")
 if [ "$DELETE_MSG" = "deleted" ]; then
@@ -202,7 +265,7 @@ else
 fi
 
 # -- Verify Cleanup -----------------------------------------------
-echo "14. Verify cleanup"
+echo "15. Verify cleanup"
 INSTANCES_AFTER=$(api GET /api/v1/instances)
 AFTER_COUNT=$(echo "$INSTANCES_AFTER" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 if [ "$AFTER_COUNT" -eq "$INST_COUNT" ]; then
@@ -219,8 +282,91 @@ if command -v incus >/dev/null 2>&1 && [ -n "$INCUS_NAME" ]; then
     fi
 fi
 
+# -- Verify disks cleaned up --------------------------------------
+echo "15b. Verify disks cleaned up"
+DISKS_POST_DELETE=$(api GET /api/v1/disks)
+DISK_COUNT_DELETE=$(echo "$DISKS_POST_DELETE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if d else 0)" 2>/dev/null || echo "0")
+if [ "$DISK_COUNT_DELETE" -eq 0 ]; then
+    pass "Disk listing empty after instance deletion"
+else
+    fail "Expected 0 disks after delete, got $DISK_COUNT_DELETE"
+fi
+
+# -- Verify Incus volume removed ----------------------------------
+echo "15c. Verify Incus volume cleanup"
+if command -v incus >/dev/null 2>&1 && [ -n "$INCUS_NAME" ]; then
+    VOL_NAME="${INCUS_NAME}-workspace"
+    if incus storage volume list default --format csv 2>/dev/null | grep -q "$VOL_NAME"; then
+        fail "Storage volume $VOL_NAME still exists after instance deletion"
+    else
+        pass "Storage volume $VOL_NAME properly removed"
+    fi
+else
+    info "Incus CLI not available - skipping volume cleanup verification"
+fi
+
+# -- Cleanup secret -----------------------------------------------
+echo "16. Cleanup TAILSCALE_AUTH_KEY secret"
+api DELETE "/api/v1/secrets/$SECRET_ID" > /dev/null
+pass "Secret cleaned up"
+
+# -- Git Repos CRUD -----------------------------------------------
+echo "17. Git repos: generate server key"
+KEY_RESP=$(api POST /api/v1/admin/repos/server-key/generate)
+PUB_KEY=$(echo "$KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('public_key',''))" 2>/dev/null || echo "")
+if [[ "$PUB_KEY" == ssh-ed25519* ]]; then
+    pass "Server SSH key generated (${PUB_KEY:0:30}...)"
+else
+    fail "Generate server key failed: $KEY_RESP"
+fi
+
+echo "18. Git repos: get server key"
+GET_KEY_RESP=$(api GET /api/v1/admin/repos/server-key)
+GET_PUB=$(echo "$GET_KEY_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('public_key',''))" 2>/dev/null || echo "")
+if [[ "$GET_PUB" == ssh-ed25519* ]]; then
+    pass "Server SSH key retrieved"
+else
+    fail "Get server key failed: $GET_KEY_RESP"
+fi
+
+echo "19. Git repos: add repo (expect fail gracefully without network)"
+ADD_RESP=$(api POST /api/v1/admin/repos -d '{"ssh_url":"git@github.com:catie-aq/AI-state-art-public.git"}')
+REPO_ID=$(echo "$ADD_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+if [ -n "$REPO_ID" ]; then
+    pass "Repo registered with id=$REPO_ID (cloning in background)"
+else
+    fail "Add repo failed: $ADD_RESP"
+fi
+
+echo "20. Git repos: list repos"
+LIST_RESP=$(api GET /api/v1/admin/repos)
+REPO_COUNT=$(echo "$LIST_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+if [ "$REPO_COUNT" -ge 1 ]; then
+    pass "Listed $REPO_COUNT repo(s)"
+else
+    fail "List repos failed: $LIST_RESP"
+fi
+
+echo "21. Git repos: sync repo"
+SYNC_RESP=$(api POST "/api/v1/admin/repos/$REPO_ID/sync")
+SYNC_STATUS=$(echo "$SYNC_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+if [ "$SYNC_STATUS" = "syncing" ]; then
+    pass "Sync triggered"
+else
+    fail "Sync failed: $SYNC_RESP"
+fi
+
+echo "22. Git repos: delete repo"
+DEL_RESP=$(api DELETE "/api/v1/admin/repos/$REPO_ID")
+DEL_STATUS=$(echo "$DEL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+if [ "$DEL_STATUS" = "deleted" ]; then
+    pass "Repo deleted"
+else
+    fail "Delete repo failed: $DEL_RESP"
+fi
+
 # -- Logout -------------------------------------------------------
-echo "15. Logout"
+echo "23. Logout"
 LOGOUT=$(api POST /auth/logout)
 pass "Logged out"
 

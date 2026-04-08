@@ -26,6 +26,7 @@ RUN_API_LIFECYCLE=false
 RUN_API_ADMIN=false
 RUN_SELENIUM=false
 RUN_IMAGE=false
+RUN_E2E_INSTANCE=false
 SERVER_URL="http://localhost:8080"
 # Docker compose runs the frontend dev server on port 5300 (not the default 5173)
 FRONTEND_URL="http://localhost:5300"
@@ -35,12 +36,13 @@ TAILSCALE_AUTH_KEY="tskey-auth-kRqVWCq18Z11CNTRL-qZFfkoAyAcMT1NYmuVmbbMPZwnK3opj
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --all)           RUN_SCREENSHOTS=true; RUN_API_LIFECYCLE=true; RUN_API_ADMIN=true; RUN_SELENIUM=true; RUN_IMAGE=true; shift ;;
+    --all)           RUN_SCREENSHOTS=true; RUN_API_LIFECYCLE=true; RUN_API_ADMIN=true; RUN_SELENIUM=true; RUN_IMAGE=true; RUN_E2E_INSTANCE=true; shift ;;
     --screenshots)   RUN_SCREENSHOTS=true; shift ;;
     --api-lifecycle) RUN_API_LIFECYCLE=true; shift ;;
     --api-admin)     RUN_API_ADMIN=true; shift ;;
     --selenium)      RUN_SELENIUM=true; shift ;;
     --image)         RUN_IMAGE=true; shift ;;
+    --e2e-instance)  RUN_E2E_INSTANCE=true; shift ;;
     --url)            SERVER_URL="$2"; shift 2 ;;
     --frontend-url)   FRONTEND_URL="$2"; shift 2 ;;
     --password)       ADMIN_PASSWORD="$2"; shift 2 ;;
@@ -109,6 +111,15 @@ suite_image() {
     go test -v -timeout 30m -tags e2e ./internal/e2e/...
 }
 
+suite_e2e_instance() {
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    echo "    SKIP: --password required for e2e-instance"
+    return 1
+  fi
+  TAILSCALE_AUTH_KEY="$TAILSCALE_AUTH_KEY" \
+    "$ROOT/scripts/test-instance-e2e.sh" "$SERVER_URL" "$ADMIN_PASSWORD"
+}
+
 # --- run ---
 
 $RUN_UNIT        && run_suite "Go unit tests"        suite_unit
@@ -117,7 +128,8 @@ $RUN_SCREENSHOTS && run_suite "Playwright screenshots" suite_screenshots
 $RUN_API_LIFECYCLE && run_suite "Shell API lifecycle"  suite_api_lifecycle
 $RUN_API_ADMIN   && run_suite "Shell API admin"       suite_api_admin
 $RUN_SELENIUM    && run_suite "Python Selenium E2E"   suite_selenium
-$RUN_IMAGE       && run_suite "Image (cloud-init) tests" suite_image
+$RUN_IMAGE         && run_suite "Image (cloud-init) tests" suite_image
+$RUN_E2E_INSTANCE  && run_suite "Instance E2E tests"      suite_e2e_instance
 
 # --- summary ---
 echo ""

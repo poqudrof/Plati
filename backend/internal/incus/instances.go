@@ -26,18 +26,23 @@ type SetupConfig struct {
 	// SentinelPath is the file to touch after first-init to mark the volume initialized.
 	// Empty string disables sentinel write.
 	SentinelPath string
+	// MixinFileSteps are file-push steps prepended before lifecycle commands (on first init).
+	// Used for large mixin files (binaries, tarballs) pushed via PushFile instead of shell commands.
+	MixinFileSteps []SetupStep
 }
 
 // SetupStep pairs a human-readable label with either a shell command or a file push.
 // When FileContent is non-nil the step is executed via PushFile; otherwise via RunCommand.
+// When FileSourcePath is non-empty, the file is read from disk and pushed (for large files).
 type SetupStep struct {
-	Label       string
-	Cmd         []string // shell command; used when FileContent is nil
-	FileDest    string   // remote path for file push
-	FileContent []byte   // if set, use PushFile instead of RunCommand
-	FileMode    int      // unix mode (e.g. 0600)
-	FileUID     int64
-	FileGID     int64
+	Label          string
+	Cmd            []string // shell command; used when FileContent is nil and FileSourcePath is empty
+	FileDest       string   // remote path for file push
+	FileContent    []byte   // if set, use PushFile instead of RunCommand
+	FileSourcePath string   // if set, read from disk and PushFile (used for large mixin binaries)
+	FileMode       int      // unix mode (e.g. 0600)
+	FileUID        int64
+	FileGID        int64
 }
 
 // BuildSetupSteps returns an ordered list of labeled steps to run via incus exec
@@ -48,6 +53,13 @@ func BuildSetupSteps(cfg SetupConfig) []SetupStep {
 	steps = append(steps, buildSSHSetupSteps("/root/.ssh", cfg.PublicKeys, cfg.PrivateKeyPEMs, "")...)
 
 	if cfg.TerminalUser != "" {
+		// Wait for cloud-init to finish so the terminal_user (e.g. "ubuntu") exists
+		// before we mkdir/chown their .ssh dir. Without this, chown silently fails
+		// and authorized_keys ends up owned by root, blocking SSH logins.
+		steps = append(steps, SetupStep{
+			Label: "Wait for cloud-init",
+			Cmd:   []string{"/bin/sh", "-c", "cloud-init status --wait 2>/dev/null || true"},
+		})
 		dir := fmt.Sprintf("/home/%s/.ssh", cfg.TerminalUser)
 		steps = append(steps, buildSSHSetupSteps(dir, cfg.PublicKeys, cfg.PrivateKeyPEMs, cfg.TerminalUser)...)
 	}
@@ -56,7 +68,11 @@ func BuildSetupSteps(cfg SetupConfig) []SetupStep {
 		steps = append(steps, buildSecretsEnvFileSteps(cfg.Secrets)...)
 	}
 
-	// Choose which lifecycle commands to run.
+	// Push mixin files before lifecycle commands (first init only).
+	if cfg.IsFirstInit {
+		steps = append(steps, cfg.MixinFileSteps...)
+	}
+
 	if cfg.IsFirstInit {
 		initCmds := cfg.FirstInitCmds
 		if len(initCmds) == 0 {

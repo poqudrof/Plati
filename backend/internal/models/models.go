@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+type GitRepo struct {
+	ID           int64      `db:"id"             json:"id"`
+	Name         string     `db:"name"           json:"name"`
+	SSHURL       string     `db:"ssh_url"        json:"ssh_url"`
+	LocalPath    string     `db:"local_path"     json:"local_path"`
+	CloneStatus  string     `db:"clone_status"   json:"clone_status"`
+	ErrorMessage *string    `db:"error_message"  json:"error_message,omitempty"`
+	LastSyncedAt *time.Time `db:"last_synced_at" json:"last_synced_at,omitempty"`
+	CreatedAt    time.Time  `db:"created_at"     json:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"     json:"updated_at"`
+}
+
+type TemplateRepoRef struct {
+	Name string `json:"name"` // matches git_repos.name
+	Dest string `json:"dest"` // path inside instance e.g. "/workspace/AI-state-art-public"
+}
+
 type User struct {
 	ID           int64          `db:"id" json:"id"`
 	Email        string         `db:"email" json:"email"`
@@ -91,6 +108,9 @@ type Template struct {
 	FirstInitCommands  string    `db:"first_init_commands" json:"first_init_commands"`   // JSON array
 	RebuildCommands    string    `db:"rebuild_commands"    json:"rebuild_commands"`      // JSON array
 	Includes           string    `db:"includes"            json:"includes"`               // JSON array of mixin names
+	Repos              string    `db:"repos"               json:"repos"`                 // JSON array of {name,dest} repo refs
+	HealthChecks       string    `db:"health_checks"       json:"health_checks"`         // JSON array of {port,path,expected_status,timeout,description}
+	TailscaleServe     string    `db:"tailscale_serve"     json:"tailscale_serve"`       // JSON object {port,funnel} or empty
 	IsActive           bool      `db:"is_active" json:"is_active"`
 	CreatedAt          time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
@@ -118,6 +138,37 @@ type Volume struct {
 	Pool      string    `db:"pool" json:"pool"`
 	SizeGB    int       `db:"size_gb" json:"size_gb"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// VolumeDetail is an instance_volume row enriched with volume metadata.
+type VolumeDetail struct {
+	VolumeID   int64     `db:"volume_id"    json:"volume_id"`
+	MountPath  string    `db:"mount_path"   json:"mount_path"`
+	DeviceName string    `db:"device_name"  json:"device_name"`
+	VolumeName string    `db:"volume_name"  json:"volume_name"`
+	Pool       string    `db:"pool"         json:"pool"`
+	SizeGB     int       `db:"size_gb"      json:"size_gb"`
+	CreatedAt  time.Time `db:"created_at"   json:"created_at"`
+}
+
+// DiskInfo is a volume enriched with instance, user, and server context.
+type DiskInfo struct {
+	VolumeID     int64     `db:"volume_id"      json:"volume_id"`
+	VolumeName   string    `db:"volume_name"     json:"volume_name"`
+	Pool         string    `db:"pool"            json:"pool"`
+	SizeGB       int       `db:"size_gb"         json:"size_gb"`
+	MountPath    string    `db:"mount_path"      json:"mount_path"`
+	DeviceName   string    `db:"device_name"     json:"device_name"`
+	InstanceID   int64     `db:"instance_id"     json:"instance_id"`
+	InstanceName string    `db:"instance_name"   json:"instance_name"`
+	IncusName    string    `db:"incus_name"      json:"incus_name"`
+	Status       string    `db:"status"          json:"status"`
+	UserID       int64     `db:"user_id"         json:"user_id"`
+	UserEmail    string    `db:"user_email"      json:"user_email"`
+	UserName     string    `db:"user_name"       json:"user_name"`
+	ServerID     int64     `db:"server_id"       json:"server_id"`
+	ServerName   string    `db:"server_name"     json:"server_name"`
+	CreatedAt    time.Time `db:"created_at"      json:"created_at"`
 }
 
 type Instance struct {

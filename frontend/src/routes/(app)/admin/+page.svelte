@@ -1,14 +1,20 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
-  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult } from '$lib/api/types';
+  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
-  let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' = $state('templates');
+  let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' | 'repos' = $state('templates');
   let templateList: Template[] = $state([]);
   let serverList: Server[] = $state([]);
   let userList: User[] = $state([]);
-  let importJson = $state('');
+  let importYaml = $state('');
+
+  // Git repos
+  let repos: GitRepo[] = $state([]);
+  let repoServerKey = $state('');
+  let newSSHURL = $state('');
+  let reposLoading = $state(false);
 
   // Template editing
   let editingTemplate: Template | null = $state(null);
@@ -23,6 +29,7 @@
   let newKeyName = $state('');
   let generatedKey: GeneratedManagedKeyResult | null = $state(null);
   let assigningKey: { id: number; name: string; assignedIDs: number[] } | null = $state(null);
+  let serverGitKeyID = $state(0);
 
   async function loadTemplates() {
     try { templateList = await templatesApi.list(); } catch (e: any) { addNotification('error', 'Failed to load templates: ' + e.message); }
@@ -45,10 +52,10 @@
   }
 
   async function importTemplate() {
-    if (!importJson) return;
+    if (!importYaml) return;
     try {
-      await admin.templates.import(JSON.parse(importJson));
-      importJson = '';
+      await admin.templates.import(importYaml);
+      importYaml = '';
       await loadTemplates();
       addNotification('success', 'Template imported');
     } catch (e: any) { addNotification('error', e.message); }
@@ -117,6 +124,21 @@
 
   async function loadManagedKeys() {
     try { managedKeyList = await admin.managedKeys.list(); } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function loadServerGitKey() {
+    try {
+      const result = await admin.repos.getServerKey();
+      serverGitKeyID = result.managed_key_id ?? 0;
+    } catch { serverGitKeyID = 0; }
+  }
+
+  async function useAsServerKey(keyID: number) {
+    try {
+      await admin.repos.setServerManagedKey(keyID);
+      serverGitKeyID = keyID;
+      addNotification('success', 'Key set as server git key');
+    } catch (e: any) { addNotification('error', e.message); }
   }
 
   async function generateManagedKey() {
@@ -210,12 +232,67 @@
     } catch (e: any) { addNotification('error', e.message); }
   }
 
+  async function loadRepos() {
+    try { repos = await admin.repos.list(); } catch (e: any) { addNotification('error', 'Failed to load repos: ' + e.message); }
+  }
+
+  async function loadRepoServerKey() {
+    try {
+      const result = await admin.repos.getServerKey();
+      repoServerKey = result.public_key;
+    } catch { repoServerKey = ''; }
+  }
+
+  async function addRepo() {
+    if (!newSSHURL.trim()) return;
+    reposLoading = true;
+    try {
+      await admin.repos.add(newSSHURL.trim());
+      newSSHURL = '';
+      await loadRepos();
+      addNotification('success', 'Repository added and cloning started');
+    } catch (e: any) {
+      addNotification('error', 'Failed to add repo: ' + e.message);
+    } finally {
+      reposLoading = false;
+    }
+  }
+
+  async function deleteRepo(id: number, name: string) {
+    if (!confirm(`Delete repo "${name}"? This will remove the local clone.`)) return;
+    try {
+      await admin.repos.delete(id);
+      await loadRepos();
+      addNotification('success', 'Repository deleted');
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function syncRepo(id: number) {
+    try {
+      await admin.repos.sync(id);
+      addNotification('success', 'Sync started');
+      setTimeout(loadRepos, 2000);
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  function repoStatusColor(status: string) {
+    switch (status) {
+      case 'ready': return 'text-green-600 bg-green-50';
+      case 'cloning': return 'text-blue-600 bg-blue-50';
+      case 'error': return 'text-red-600 bg-red-50';
+      default: return 'text-gray-600 bg-gray-50';
+    }
+  }
+
   if (browser) {
     loadTemplates();
     loadServers();
     loadUsers();
     loadManagedKeys();
     loadAdminSettings();
+    loadServerGitKey();
+    loadRepos();
+    loadRepoServerKey();
   }
 </script>
 
@@ -223,11 +300,13 @@
   <h1 class="text-2xl font-bold mb-6">Admin</h1>
 
   <div class="flex space-x-4 mb-6 border-b">
-    <button onclick={() => tab = 'templates'} class="pb-2 px-1 {tab === 'templates' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Templates</button>
-    <button onclick={() => tab = 'servers'} class="pb-2 px-1 {tab === 'servers' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Servers</button>
-    <button onclick={() => tab = 'users'} class="pb-2 px-1 {tab === 'users' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Users</button>
-    <button onclick={() => tab = 'ssh-keys'} class="pb-2 px-1 {tab === 'ssh-keys' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">SSH Keys</button>
-    <button onclick={() => tab = 'settings'} class="pb-2 px-1 {tab === 'settings' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}">Settings</button>
+    <button onclick={() => tab = 'templates'} class="pb-2 px-1 {tab === 'templates' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">Templates</button>
+    <button onclick={() => tab = 'servers'} class="pb-2 px-1 {tab === 'servers' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">Servers</button>
+    <button onclick={() => tab = 'users'} class="pb-2 px-1 {tab === 'users' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">Users</button>
+    <button onclick={() => tab = 'ssh-keys'} class="pb-2 px-1 {tab === 'ssh-keys' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">SSH Keys</button>
+    <button onclick={() => tab = 'settings'} class="pb-2 px-1 {tab === 'settings' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">Settings</button>
+    <button onclick={() => tab = 'repos'} class="pb-2 px-1 {tab === 'repos' ? 'border-b-2 border-primary text-primary' : 'text-gray-500'}">Git Repos</button>
+    <a href="/admin/disks" class="pb-2 px-1 text-gray-500 hover:text-primary">Disks</a>
   </div>
 
   <!-- Templates Tab -->
@@ -260,8 +339,7 @@
                 {expandedTemplate === tmpl.id ? 'Collapse' : 'Details'}
               </button>
               <a href="/admin/templates/{tmpl.id}/debug" class="text-purple-600 hover:text-purple-800 text-sm">Debug</a>
-              <button onclick={() => startEditTemplate(tmpl)} class="text-indigo-600 hover:text-indigo-800 text-sm">Edit</button>
-              <button onclick={() => deleteTemplate(tmpl.id)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
+              <a href="/admin/templates/{tmpl.id}" class="text-primary hover:text-primary-dark text-sm">Edit</a>
             </div>
           </div>
 
@@ -297,9 +375,9 @@
       {/if}
 
       <div class="bg-white border rounded-lg p-4">
-        <h3 class="font-medium mb-3">Import Template (JSON)</h3>
-        <textarea bind:value={importJson} rows="6" class="w-full px-3 py-2 border rounded font-mono text-sm mb-3" placeholder="Paste template JSON here..."></textarea>
-        <button onclick={importTemplate} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Import</button>
+        <h3 class="font-medium mb-3">Import Template (YAML)</h3>
+        <textarea bind:value={importYaml} rows="6" class="w-full px-3 py-2 border rounded font-mono text-sm mb-3" placeholder="Paste template YAML here..."></textarea>
+        <button onclick={importTemplate} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Import</button>
       </div>
     </div>
   {/if}
@@ -342,7 +420,7 @@
             <div class="mt-3">
               <div class="w-full bg-gray-200 rounded-full h-2">
                 <div
-                  class="h-2 rounded-full {((server.instance_count || 0) / server.max_instances) > 0.8 ? 'bg-red-500' : 'bg-indigo-500'}"
+                  class="h-2 rounded-full {((server.instance_count || 0) / server.max_instances) > 0.8 ? 'bg-red-500' : 'bg-primary'}"
                   style="width: {Math.min(((server.instance_count || 0) / server.max_instances) * 100, 100)}%"
                 ></div>
               </div>
@@ -386,7 +464,7 @@
           <button
             onclick={saveTailscaleKey}
             disabled={savingTailscale || !tailscaleInput.trim()}
-            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm whitespace-nowrap"
+            class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap"
           >
             {tailscaleConfigured ? 'Replace Key' : 'Save Key'}
           </button>
@@ -395,12 +473,92 @@
     </div>
   {/if}
 
+  <!-- Git Repos Tab -->
+  {#if tab === 'repos'}
+    <div class="space-y-8">
+      <!-- Add repo -->
+      <section class="border rounded-lg p-6 space-y-4">
+        <h2 class="text-lg font-semibold">Add Repository</h2>
+        <form onsubmit={(e) => { e.preventDefault(); addRepo(); }} class="flex gap-2">
+          <input
+            type="text"
+            bind:value={newSSHURL}
+            placeholder="git@github.com:org/repo.git"
+            class="flex-1 border rounded px-3 py-2 text-sm font-mono"
+            disabled={reposLoading}
+          />
+          <button
+            type="submit"
+            disabled={reposLoading || !newSSHURL.trim()}
+            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          >Add</button>
+        </form>
+      </section>
+
+      <!-- Repo list -->
+      <section class="space-y-3">
+        {#if repos.length === 0}
+          <p class="text-gray-500 text-sm">No repositories registered.</p>
+        {:else}
+          {#each repos as repo (repo.id)}
+            <div class="border rounded-lg p-4 space-y-2">
+              <div class="flex items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="font-medium">{repo.name}</div>
+                  <div class="text-xs text-gray-500 font-mono truncate">{repo.ssh_url}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="px-2 py-0.5 rounded text-xs font-medium {repoStatusColor(repo.clone_status)}">
+                    {repo.clone_status}
+                  </span>
+                  <button
+                    onclick={() => syncRepo(repo.id)}
+                    class="px-3 py-1 text-sm border rounded hover:bg-gray-50"
+                    title="Pull latest"
+                  >Sync</button>
+                  <button
+                    onclick={() => deleteRepo(repo.id, repo.name)}
+                    class="px-3 py-1 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50"
+                  >Delete</button>
+                </div>
+              </div>
+              {#if repo.clone_status === 'error' && repo.error_message}
+                <pre class="text-xs text-red-700 bg-red-50 p-2 rounded overflow-x-auto">{repo.error_message}</pre>
+              {/if}
+              {#if repo.last_synced_at}
+                <div class="text-xs text-gray-400">Last synced: {new Date(repo.last_synced_at).toLocaleString()}</div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </section>
+
+      <!-- Server SSH Key -->
+      <section class="border-t pt-6">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Server SSH Key</p>
+            {#if repoServerKey}
+              <p class="text-xs text-gray-400 mb-1">Add as a deploy key (read-only) on each GitHub repo you want to cache.</p>
+              <div class="flex items-center gap-2">
+                <code class="text-xs bg-gray-100 px-2 py-1 rounded font-mono truncate max-w-md">{repoServerKey}</code>
+                <button onclick={() => copyText(repoServerKey, 'Server key')} class="text-xs text-primary hover:text-primary-dark border border-primary/20 rounded px-2 py-0.5 shrink-0">Copy</button>
+              </div>
+            {:else}
+              <p class="text-xs text-gray-400">No server key configured. Set one in the SSH Keys tab.</p>
+            {/if}
+          </div>
+        </div>
+      </section>
+    </div>
+  {/if}
+
   <!-- Users Tab -->
   {#if tab === 'users'}
     <div class="flex justify-end mb-3">
       <button
         onclick={() => creatingUser = { email: '', name: '', password: '', isAdmin: false }}
-        class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm"
+        class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm"
       >
         Create User
       </button>
@@ -428,7 +586,7 @@
               </td>
               <td class="px-4 py-3 text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString()}</td>
               <td class="px-4 py-3 text-right">
-                <button onclick={() => startEditUser(user)} class="text-indigo-600 hover:text-indigo-800 text-sm mr-2">Edit</button>
+                <button onclick={() => startEditUser(user)} class="text-primary hover:text-primary-dark text-sm mr-2">Edit</button>
                 <button onclick={() => deleteUser(user)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
               </td>
             </tr>
@@ -455,14 +613,20 @@
 
       <div class="space-y-3 mb-4">
         {#each managedKeyList as key}
-          <div class="p-3 bg-gray-50 rounded border">
+          <div class="p-3 rounded border {serverGitKeyID === key.id ? 'bg-primary-50 border-primary/30' : 'bg-gray-50'}">
             <div class="flex justify-between items-start">
-              <div>
+              <div class="flex items-center gap-2">
                 <span class="font-medium text-sm">{key.name}</span>
-                <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+                {#if serverGitKeyID === key.id}
+                  <span class="text-xs bg-primary-50 text-primary-dark px-1.5 py-0.5 rounded font-medium">Server git key</span>
+                {/if}
+                <span class="text-xs text-gray-400">{new Date(key.created_at).toLocaleDateString()}</span>
               </div>
-              <div class="flex gap-3 ml-4">
-                <button onclick={() => openAssignUsers(key)} class="text-indigo-600 hover:text-indigo-800 text-sm">Assign users</button>
+              <div class="flex gap-3 ml-4 shrink-0">
+                {#if serverGitKeyID !== key.id}
+                  <button onclick={() => useAsServerKey(key.id)} class="text-primary hover:text-primary-dark text-sm">Use as server key</button>
+                {/if}
+                <button onclick={() => openAssignUsers(key)} class="text-primary hover:text-primary-dark text-sm">Assign users</button>
                 <button onclick={() => deleteManagedKey(key.id, key.name)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
               </div>
             </div>
@@ -470,7 +634,7 @@
               <code class="text-xs text-gray-500 font-mono truncate flex-1">{key.public_key.substring(0, 60)}…</code>
               <button
                 onclick={() => copyText(key.public_key, 'Public key')}
-                class="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded px-2 py-0.5 shrink-0"
+                class="text-xs text-primary hover:text-primary-dark border border-primary/20 rounded px-2 py-0.5 shrink-0"
               >
                 Copy public key
               </button>
@@ -492,7 +656,7 @@
         <button
           onclick={generateManagedKey}
           disabled={!newKeyName.trim()}
-          class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm whitespace-nowrap"
+          class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap"
         >
           Generate Key
         </button>
@@ -515,7 +679,7 @@
           <div>
             <div class="flex justify-between items-center mb-1">
               <label class="text-sm font-medium">Public key</label>
-              <button onclick={() => copyText(generatedKey!.public_key, 'Public key')} class="text-xs text-indigo-600 hover:underline">Copy</button>
+              <button onclick={() => copyText(generatedKey!.public_key, 'Public key')} class="text-xs text-primary hover:underline">Copy</button>
             </div>
             <p class="text-xs text-gray-500 mb-1">Add to GitHub → Settings → SSH and GPG keys.</p>
             <textarea readonly rows="2" class="w-full px-3 py-2 border rounded font-mono text-xs bg-gray-50">{generatedKey.public_key}</textarea>
@@ -523,14 +687,14 @@
           <div>
             <div class="flex justify-between items-center mb-1">
               <label class="text-sm font-medium">Private key</label>
-              <button onclick={() => copyText(generatedKey!.private_key, 'Private key')} class="text-xs text-indigo-600 hover:underline">Copy</button>
+              <button onclick={() => copyText(generatedKey!.private_key, 'Private key')} class="text-xs text-primary hover:underline">Copy</button>
             </div>
             <p class="text-xs text-gray-500 mb-1">Store securely as a backup. Not needed for normal operation.</p>
             <textarea readonly rows="6" class="w-full px-3 py-2 border rounded font-mono text-xs bg-gray-50">{generatedKey.private_key}</textarea>
           </div>
         </div>
         <div class="flex justify-end mt-6 pt-4 border-t">
-          <button onclick={() => generatedKey = null} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Done</button>
+          <button onclick={() => generatedKey = null} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Done</button>
         </div>
       </div>
     </div>
@@ -564,7 +728,7 @@
         </div>
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => assigningKey = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={saveAssignments} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Save</button>
+          <button onclick={saveAssignments} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Save</button>
         </div>
       </div>
     </div>
@@ -628,7 +792,7 @@
         </div>
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => editingTemplate = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={saveTemplate} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Save</button>
+          <button onclick={saveTemplate} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Save</button>
         </div>
       </div>
     </div>
@@ -661,7 +825,7 @@
         </div>
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => creatingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={createUser} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Create</button>
+          <button onclick={createUser} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Create</button>
         </div>
       </div>
     </div>
@@ -689,7 +853,7 @@
         </div>
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => editingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={saveUser} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Save</button>
+          <button onclick={saveUser} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Save</button>
         </div>
       </div>
     </div>

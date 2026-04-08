@@ -14,6 +14,12 @@ make dev                  # or: mprocs
 
 Backend runs on `:8080`, frontend dev server on `:5173` (proxies `/api`, `/auth`, `/health` to backend).
 
+After Go changes, restart the backend via Docker to apply them:
+
+```bash
+docker compose -f docker-compose.dev.yml restart backend
+```
+
 ## Architecture
 
 ```
@@ -103,6 +109,45 @@ rebuild_commands:       # run on Rebuild() when sentinel exists
 ```
 
 Backward compat: templates without a `persistence` block get a single `/workspace` volume sized from `resources.disk`.
+
+## Storage Management
+
+Users can browse, download, and snapshot their persistent volumes from the **Storage** tab on the instance detail page.
+
+### Backend
+
+`internal/incus/client.go` exposes 7 storage methods on `IncusClient`:
+- `ListDirectory` — `find -printf` inside the instance (returns SVAR-compatible `FileEntry`)
+- `GetFile` / `StreamDirectory` — download single file (SDK `GetInstanceFile`) or directory (tar stream)
+- `ListVolumeSnapshots` / `CreateVolumeSnapshot` / `DeleteVolumeSnapshot` / `RestoreVolumeSnapshot` — Incus SDK volume snapshot operations
+
+`internal/services/storage_service.go` — dedicated service (not in `InstanceService`). Every method validates ownership via `GetInstanceByUser` and checks the requested path is within a mounted volume (traversal protection). Snapshot restore requires instance stopped.
+
+`internal/handlers/storage.go` — HTTP handlers. Download endpoints stream binary with `Content-Disposition: attachment`.
+
+### API Endpoints
+
+All under `/api/v1/instances/{id}/storage/`, JWT-authed:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `browse?path=/workspace` | Directory listing (lazy load for SVAR file manager) |
+| `GET` | `download?path=/workspace/file.txt` | Stream single file download |
+| `GET` | `download-dir?path=/workspace/dir` | Stream directory as .tar |
+| `GET` | `volumes/{vol_id}/snapshots` | List volume snapshots |
+| `POST` | `volumes/{vol_id}/snapshots` | Create snapshot `{"name":"..."}` |
+| `DELETE` | `volumes/{vol_id}/snapshots/{name}` | Delete snapshot |
+| `POST` | `volumes/{vol_id}/snapshots/{name}/restore` | Restore snapshot (instance must be stopped) |
+
+Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (returns `InstanceStorageInfo` with `VolumeDetail[]` including `volume_id`).
+
+### Frontend
+
+- **SVAR File Manager** (`@svar-ui/svelte-filemanager`) — third-party Svelte 5 component for the file browser
+- `StorageTab.svelte` — component with two sections: file browser (SVAR with lazy `request-data` → `provide-data`) and per-volume snapshot management (create/list/restore/delete)
+- Integrated as the default tab on the instance detail page
+- Downloads use `window.open()` to the streaming endpoints (cookie auth works automatically)
+- Snapshot restore is disabled when instance is running (button grayed out + service-level check)
 
 ## Frontend Patterns
 

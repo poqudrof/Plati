@@ -90,14 +90,27 @@ export interface Template {
   rebuild_commands: string;
   /** JSON array of mixin names included by this template */
   includes: string;
+  /** JSON array of {name, dest} repo refs */
+  repos: string;
+  /** JSON array of health check objects */
+  health_checks: string;
+  /** JSON object {port, funnel} for Tailscale Serve */
+  tailscale_serve: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
 }
 
+export interface MixinFileInfo {
+  src: string;
+  dest: string;
+  mode: string;
+}
+
 export interface MixinInfo {
   name: string;
   commands: string[];
+  files: MixinFileInfo[];
 }
 
 export interface ExecResult {
@@ -148,6 +161,12 @@ export interface TailscaleServeResult {
   status: string;
   url: string;
   port: number;
+}
+
+export interface TailscaleStatusResult {
+  connected: boolean;
+  dns_name: string;
+  machine_name: string;
 }
 
 export interface InstanceSecret {
@@ -227,4 +246,63 @@ export interface SetupRequest {
   admin_password: string;
   entra?: SetupEntra;
   server?: SetupServer;
+}
+
+export interface VolumeDetail {
+  volume_id: number;
+  mount_path: string;
+  device_name: string;
+  volume_name: string;
+  pool: string;
+  size_gb: number;
+  created_at: string;
+}
+
+export interface InstanceStorageInfo {
+  persistence_mode: string;
+  volumes: VolumeDetail[];
+}
+
+export interface FileEntry {
+  id: string;
+  name: string;
+  type: 'file' | 'folder';
+  size: number;
+  date: number;
+}
+
+export interface VolumeSnapshot {
+  name: string;
+  created_at: string;
+}
+
+export interface DiskInfo {
+  volume_id: number;
+  volume_name: string;
+  pool: string;
+  size_gb: number;
+  mount_path: string;
+  device_name: string;
+  instance_id: number;
+  instance_name: string;
+  incus_name: string;
+  status: string;
+  user_id: number;
+  user_email: string;
+  user_name: string;
+  server_id: number;
+  server_name: string;
+  created_at: string;
+}
+
+export interface GitRepo {
+  id: number;
+  name: string;
+  ssh_url: string;
+  local_path: string;
+  clone_status: 'pending' | 'cloning' | 'ready' | 'error';
+  error_message?: string | null;
+  last_synced_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }

@@ -18,7 +18,7 @@
 
   <div class="grid gap-4 md:grid-cols-2">
     {#each sections as section}
-      <a href={section.href} class="block bg-white border rounded-lg p-6 hover:border-indigo-300 hover:shadow-sm transition">
+      <a href={section.href} class="block bg-white border rounded-lg p-6 hover:border-primary hover:shadow-sm transition">
         <h2 class="text-lg font-semibold mb-2">{section.title}</h2>
         <p class="text-sm text-gray-500">{section.description}</p>
       </a>

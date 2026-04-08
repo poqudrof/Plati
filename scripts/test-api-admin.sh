@@ -4,8 +4,12 @@ set -euo pipefail
 # Plati Admin API Test Script
 # Tests: template CRUD, server list, user management, template import/export
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../.env
+[ -f "$SCRIPT_DIR/../.env" ] && source "$SCRIPT_DIR/../.env"
+
 BASE_URL="${1:-http://localhost:8080}"
-ADMIN_PASSWORD="${2:-admin123}"
+ADMIN_PASSWORD="${2:-${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env or pass as arg}}"
 COOKIE_JAR=$(mktemp)
 
 trap "rm -f $COOKIE_JAR" EXIT

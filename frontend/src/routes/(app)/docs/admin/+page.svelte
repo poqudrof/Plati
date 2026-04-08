@@ -56,7 +56,7 @@ templates_dir: "templates"     # Relative to config file directory`;
 
 <div class="max-w-3xl">
   <div class="mb-6">
-    <a href="/docs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Docs</a>
+    <a href="/docs" class="text-sm text-primary hover:text-primary-dark">&larr; Back to Docs</a>
   </div>
 
   <h1 class="text-2xl font-bold mb-2">Administration</h1>
@@ -69,7 +69,7 @@ templates_dir: "templates"     # Relative to config file directory`;
     <div class="bg-white border rounded-lg overflow-hidden">
       <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
         <span class="text-xs font-medium text-gray-500">config/plati.yaml</span>
-        <button onclick={copyConfig} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+        <button onclick={copyConfig} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
           {copied ? 'Copied!' : 'Copy'}
         </button>
       </div>
@@ -84,7 +84,7 @@ templates_dir: "templates"     # Relative to config file directory`;
     <div class="bg-white border rounded-lg p-4">
       <ol class="space-y-2 text-sm text-gray-600">
         {#each entraSteps as step, i}
-          <li><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium mr-2">{i + 1}</span>{step}</li>
+          <li><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-50 text-primary-dark text-xs font-medium mr-2">{i + 1}</span>{step}</li>
         {/each}
       </ol>
       <div class="mt-4 bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800">
@@ -100,7 +100,7 @@ templates_dir: "templates"     # Relative to config file directory`;
     <div class="bg-white border rounded-lg p-4">
       <ol class="space-y-2 text-sm text-gray-600">
         {#each incusSteps as step, i}
-          <li><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium mr-2">{i + 1}</span>{step}</li>
+          <li><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-50 text-primary-dark text-xs font-medium mr-2">{i + 1}</span>{step}</li>
         {/each}
       </ol>
       <div class="mt-4 bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
@@ -119,7 +119,7 @@ templates_dir: "templates"     # Relative to config file directory`;
         <li><span class="px-2 py-0.5 rounded text-xs bg-purple-100 text-purple-800">admin</span> — Full access: manage templates, servers, users, and all instances.</li>
         <li><span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-800">user</span> — Can create and manage their own instances, SSH keys, and secrets.</li>
       </ul>
-      <p>Promote a user to admin from <a href="/admin" class="text-indigo-600 underline">Admin → Users</a> by editing their role.</p>
+      <p>Promote a user to admin from <a href="/admin" class="text-primary underline">Admin → Users</a> by editing their role.</p>
     </div>
   </section>
 
@@ -127,9 +127,9 @@ templates_dir: "templates"     # Relative to config file directory`;
   <section class="mb-10">
     <h2 class="text-xl font-semibold mb-4">Managing Templates</h2>
     <div class="bg-white border rounded-lg p-4 space-y-3 text-sm text-gray-600">
-      <p>Templates can be managed from <a href="/admin" class="text-indigo-600 underline">Admin → Templates</a>:</p>
+      <p>Templates can be managed from <a href="/admin" class="text-primary underline">Admin → Templates</a>:</p>
       <ul class="list-disc list-inside space-y-1 ml-2">
-        <li><b>Import:</b> Paste a template JSON into the import form. See <a href="/docs/templates" class="text-indigo-600 underline">Template docs</a> for the schema and examples.</li>
+        <li><b>Import:</b> Paste a template JSON into the import form. See <a href="/docs/templates" class="text-primary underline">Template docs</a> for the schema and examples.</li>
         <li><b>Delete:</b> Removes the template. Existing instances using it are not affected.</li>
         <li><b>Auto-import:</b> JSON files placed in the <code class="bg-gray-100 px-1 rounded">config/templates/</code> directory are imported automatically on server start (duplicates are skipped by slug).</li>
       </ul>

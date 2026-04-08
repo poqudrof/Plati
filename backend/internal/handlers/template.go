@@ -163,6 +163,20 @@ func (h *TemplateHandler) ExportYAMLAsJSON(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"yaml": string(data)})
 }
 
+// SaveToDisk writes the template YAML back to the templates directory on disk.
+func (h *TemplateHandler) SaveToDisk(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := h.svc.SaveToDisk(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "saved"})
+}
+
 // UpdateFromYAML parses a YAML string from the request body and updates the template.
 func (h *TemplateHandler) UpdateFromYAML(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")

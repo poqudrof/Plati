@@ -23,6 +23,7 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
+    "@svar-ui/svelte-filemanager": "^2.5.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0"
   }

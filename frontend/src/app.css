@@ -5,3 +5,95 @@
 body {
   @apply bg-gray-50 text-gray-900 min-h-screen;
 }
+
+@layer components {
+  /* ── Buttons ── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-6 py-2 bg-primary text-white font-semibold text-sm
+           rounded-md border border-primary
+           hover:bg-primary-dark hover:border-primary-dark
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-200 whitespace-nowrap;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-6 py-2 bg-transparent text-primary font-semibold text-sm
+           rounded-md border border-primary
+           hover:bg-primary-50
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-200 whitespace-nowrap;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-4 py-2 bg-gray-100 text-gray-700 font-medium text-sm
+           rounded-md border border-gray-200
+           hover:bg-gray-200
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-200;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-4 py-2 bg-red-600 text-white font-medium text-sm
+           rounded-md border border-red-600
+           hover:bg-red-700 hover:border-red-700
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors duration-200;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  /* ── Cards ── */
+  .card {
+    @apply bg-white border border-gray-200 rounded-xl
+           transition-colors duration-200;
+  }
+  .card:hover {
+    @apply border-primary;
+  }
+
+  .card-static {
+    @apply bg-white border border-gray-200 rounded-xl;
+  }
+
+  /* ── Typography ── */
+  .page-title {
+    @apply text-2xl font-extrabold tracking-tight text-gray-900;
+  }
+
+  .page-subtitle {
+    @apply text-sm text-gray-500 mt-1;
+  }
+
+  /* ── Forms ── */
+  .input {
+    @apply w-full px-4 py-2 border border-gray-300 rounded-md
+           text-sm text-gray-900
+           focus:ring-2 focus:ring-primary/20 focus:border-primary
+           outline-none transition-colors duration-200;
+  }
+
+  /* ── Tabs ── */
+  .tab-active {
+    @apply border-b-2 border-primary text-primary font-medium;
+  }
+
+  .tab-inactive {
+    @apply text-gray-500 hover:text-gray-700;
+  }
+
+  /* ── Links ── */
+  .link {
+    @apply text-primary hover:text-primary-dark transition-colors duration-200;
+  }
+
+  /* ── Spinner ── */
+  .spinner {
+    @apply animate-spin rounded-full border-b-2 border-primary;
+  }
+}

@@ -15,6 +15,7 @@ type Config struct {
 	SecretEncryptionKey string         `mapstructure:"secret_encryption_key" yaml:"secret_encryption_key"`
 	SleepTimeout        string         `mapstructure:"sleep_timeout" yaml:"sleep_timeout"`
 	TemplatesDir        string         `mapstructure:"templates_dir" yaml:"templates_dir"`
+	ReposDir            string         `mapstructure:"repos_dir" yaml:"repos_dir"`
 }
 
 type ServerConfig struct {
@@ -62,6 +63,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("database.path", "plati.db")
 	v.SetDefault("sleep_timeout", "4h")
 	v.SetDefault("templates_dir", "templates")
+	v.SetDefault("repos_dir", "repos")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, err

@@ -186,6 +186,51 @@ test.describe('Terminal', () => {
     await page.waitForTimeout(2_000);
     await shot(page, '09-terminal-command-output');
   });
+
+  test('switch between root and user terminal tabs', async ({ page }) => {
+    // Discover a running instance
+    let instanceId: number | null = process.env.INSTANCE_ID
+      ? Number(process.env.INSTANCE_ID)
+      : null;
+
+    if (!instanceId) {
+      const resp = await page.request.get('/api/v1/instances');
+      if (!resp.ok()) { test.skip(); return; }
+      const data = await resp.json();
+      const list = Array.isArray(data) ? data : data.instances ?? [];
+      const running = list.find((i: any) => i.status === 'running');
+      if (!running) { test.skip(); return; }
+      instanceId = running.id;
+    }
+
+    await page.goto(`/instances/${instanceId}`);
+    await waitForContent(page);
+
+    // Check if user terminal tab exists (template has terminal_user set)
+    const userTabBtn = page.locator('button.font-mono').filter({ hasNot: page.locator('text=root') }).first();
+    const hasUserTab = await userTabBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!hasUserTab) { test.skip(); return; }
+
+    // Root tab should be active by default
+    const rootTab = page.locator('button.font-mono').filter({ hasText: 'root' });
+    await expect(rootTab).toBeVisible();
+
+    // Open root terminal
+    const openBtn = page.getByRole('button', { name: /open terminal/i });
+    await expect(openBtn).toBeVisible({ timeout: 5_000 });
+    await openBtn.click();
+    await expect(page.getByText('Connected')).toBeVisible({ timeout: 10_000 });
+    await shot(page, '10-terminal-root-tab');
+
+    // Switch to user terminal tab
+    await userTabBtn.click();
+    // Old terminal should unmount, new Open Terminal button should appear
+    const openBtn2 = page.getByRole('button', { name: /open terminal/i });
+    await expect(openBtn2).toBeVisible({ timeout: 5_000 });
+    await openBtn2.click();
+    await expect(page.getByText('Connected')).toBeVisible({ timeout: 10_000 });
+    await shot(page, '11-terminal-user-tab');
+  });
 });
 
 // ---------------------------------------------------------------------------

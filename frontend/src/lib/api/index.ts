@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, SshxURLResult, TailscaleServeResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult } from './types';
+import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo } from './types';
 
 // Setup
 export const setup = {
@@ -24,12 +24,21 @@ export const users = {
   generateUserKey: (name: string) =>
     api.post<GeneratedKeyResult>('/api/v1/user-keys/generate', { name }),
   deleteUserKey: (id: number) => api.del(`/api/v1/user-keys/${id}`),
+  listSSHKeys: () => api.get<SSHKey[]>('/api/v1/ssh-keys'),
+  createSSHKey: (name: string, public_key: string) =>
+    api.post<SSHKey>('/api/v1/ssh-keys', { name, public_key }),
+  deleteSSHKey: (id: number) => api.del(`/api/v1/ssh-keys/${id}`),
   listSecrets: () => api.get<Secret[]>('/api/v1/secrets'),
   createSecret: (name: string, value: string) =>
     api.post<{ id: number }>('/api/v1/secrets', { name, value }),
   updateSecret: (id: number, value: string) =>
     api.put(`/api/v1/secrets/${id}`, { value }),
   deleteSecret: (id: number) => api.del(`/api/v1/secrets/${id}`)
+};
+
+// Disks (current user)
+export const disks = {
+  list: () => api.get<DiskInfo[]>('/api/v1/disks')
 };
 
 // Templates
@@ -50,6 +59,7 @@ export const instances = {
   rebuild: (id: number) => api.post(`/api/v1/instances/${id}/rebuild`),
   delete: (id: number) => api.del(`/api/v1/instances/${id}`),
   stats: (id: number) => api.get<InstanceStats>(`/api/v1/instances/${id}/stats`),
+  volumes: (id: number) => api.get<InstanceStorageInfo>(`/api/v1/instances/${id}/volumes`),
   sshxUrl: (id: number) => api.get<SshxURLResult>(`/api/v1/instances/${id}/sshx-url`),
   duplicate: (id: number) => api.post<Instance>(`/api/v1/instances/${id}/duplicate`),
   tailscaleServe: (id: number, port: number) =>
@@ -58,13 +68,30 @@ export const instances = {
     api.get<TailscaleServeResult>(`/api/v1/instances/${id}/tailscale-serve`),
   tailscaleServeOff: (id: number) =>
     api.del(`/api/v1/instances/${id}/tailscale-serve`),
+  tailscaleStatus: (id: number) =>
+    api.get<TailscaleStatusResult>(`/api/v1/instances/${id}/tailscale-status`),
   listSecrets: (id: number) => api.get<InstanceSecret[]>(`/api/v1/instances/${id}/secrets`),
   createSecret: (id: number, name: string, value: string) =>
     api.post<{ id: number }>(`/api/v1/instances/${id}/secrets`, { name, value }),
   updateSecret: (id: number, secretId: number, value: string) =>
     api.put(`/api/v1/instances/${id}/secrets/${secretId}`, { value }),
   deleteSecret: (id: number, secretId: number) =>
-    api.del(`/api/v1/instances/${id}/secrets/${secretId}`)
+    api.del(`/api/v1/instances/${id}/secrets/${secretId}`),
+  // Storage
+  browseDirectory: (id: number, path: string) =>
+    api.get<FileEntry[]>(`/api/v1/instances/${id}/storage/browse?path=${encodeURIComponent(path)}`),
+  downloadFileUrl: (id: number, path: string) =>
+    `/api/v1/instances/${id}/storage/download?path=${encodeURIComponent(path)}`,
+  downloadDirUrl: (id: number, path: string) =>
+    `/api/v1/instances/${id}/storage/download-dir?path=${encodeURIComponent(path)}`,
+  listSnapshots: (id: number, volId: number) =>
+    api.get<VolumeSnapshot[]>(`/api/v1/instances/${id}/storage/volumes/${volId}/snapshots`),
+  createSnapshot: (id: number, volId: number, name: string) =>
+    api.post<{ message: string }>(`/api/v1/instances/${id}/storage/volumes/${volId}/snapshots`, { name }),
+  deleteSnapshot: (id: number, volId: number, snapshotName: string) =>
+    api.del(`/api/v1/instances/${id}/storage/volumes/${volId}/snapshots/${encodeURIComponent(snapshotName)}`),
+  restoreSnapshot: (id: number, volId: number, snapshotName: string) =>
+    api.post<{ message: string }>(`/api/v1/instances/${id}/storage/volumes/${volId}/snapshots/${encodeURIComponent(snapshotName)}/restore`)
 };
 
 // Admin
@@ -73,13 +100,14 @@ export const admin = {
     create: (tmpl: Partial<Template>) => api.post<Template>('/api/v1/admin/templates', tmpl),
     update: (id: number, tmpl: Partial<Template>) => api.put<Template>(`/api/v1/admin/templates/${id}`, tmpl),
     delete: (id: number) => api.del(`/api/v1/admin/templates/${id}`),
-    import: (json: unknown) => api.post<Template>('/api/v1/admin/templates/import', json),
+    import: (yaml: string) => api.postRaw<Template>('/api/v1/admin/templates/import', yaml, 'text/yaml'),
     listMixins: () => api.get<MixinInfo[]>('/api/v1/admin/templates/mixins'),
     debugCreate: (id: number) => api.post<Instance>(`/api/v1/admin/templates/${id}/debug`, {}),
     duplicate: (id: number, name: string, slug: string) => api.post<Template>(`/api/v1/admin/templates/${id}/duplicate`, { name, slug }),
     exportYAML: (id: number) => api.get<{ yaml: string }>(`/api/v1/admin/templates/${id}/export-yaml`),
     updateFromYAML: (id: number, yaml: string) => api.post<Template>(`/api/v1/admin/templates/${id}/update-from-yaml`, { yaml }),
-    getDebugInstance: (id: number) => api.get<Instance>(`/api/v1/admin/templates/${id}/debug/instance`)
+    getDebugInstance: (id: number) => api.get<Instance>(`/api/v1/admin/templates/${id}/debug/instance`),
+    saveToDisk: (id: number) => api.post<{ message: string }>(`/api/v1/admin/templates/${id}/save-to-disk`)
   },
   servers: {
     list: () => api.get<Server[]>('/api/v1/admin/servers')
@@ -120,5 +148,19 @@ export const admin = {
     getTailscaleKey: () => api.get<{ configured: boolean }>('/api/v1/admin/settings/tailscale-key'),
     setTailscaleKey: (value: string) => api.put('/api/v1/admin/settings/tailscale-key', { value }),
     deleteTailscaleKey: () => api.del('/api/v1/admin/settings/tailscale-key')
+  },
+  disks: {
+    list: () => api.get<DiskInfo[]>('/api/v1/admin/disks')
+  },
+  repos: {
+    list: () => api.get<GitRepo[]>('/api/v1/admin/repos'),
+    add: (ssh_url: string) => api.post<GitRepo>('/api/v1/admin/repos', { ssh_url }),
+    delete: (id: number) => api.del(`/api/v1/admin/repos/${id}`),
+    rename: (id: number, name: string) => api.put(`/api/v1/admin/repos/${id}`, { name }),
+    sync: (id: number) => api.post<{ status: string; command: string; output: string }>(`/api/v1/admin/repos/${id}/sync`),
+    getServerKey: () => api.get<{ public_key: string; managed_key_id?: number }>('/api/v1/admin/repos/server-key'),
+    generateServerKey: () => api.post<{ public_key: string }>('/api/v1/admin/repos/server-key/generate'),
+    setServerManagedKey: (managed_key_id: number) =>
+      api.put<{ public_key: string; managed_key_id: number }>('/api/v1/admin/repos/server-key/managed', { managed_key_id })
   }
 };

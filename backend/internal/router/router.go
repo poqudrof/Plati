@@ -22,6 +22,8 @@ type Deps struct {
 	TerminalHandler      *handlers.TerminalHandler
 	PreferencesHandler   *handlers.PreferencesHandler
 	AdminSettingsHandler *handlers.AdminSettingsHandler
+	RepoHandler          *handlers.RepoHandler
+	StorageHandler       *handlers.StorageHandler
 	JWTSecret            string
 	FrontendURL          string
 }
@@ -79,6 +81,9 @@ func New(deps Deps) *chi.Mux {
 			r.Put("/secrets/{id}", deps.UserHandler.UpdateSecret)
 			r.Delete("/secrets/{id}", deps.UserHandler.DeleteSecret)
 
+			// Disks (user's own volumes)
+			r.Get("/disks", deps.InstanceHandler.ListDisks)
+
 			// Templates (read-only for users)
 			r.Get("/templates", deps.TemplateHandler.List)
 			r.Get("/templates/{id}", deps.TemplateHandler.Get)
@@ -92,12 +97,14 @@ func New(deps Deps) *chi.Mux {
 			r.Post("/instances/{id}/stop", deps.InstanceHandler.Stop)
 			r.Post("/instances/{id}/rebuild", deps.InstanceHandler.Rebuild)
 			r.Delete("/instances/{id}", deps.InstanceHandler.Delete)
+			r.Get("/instances/{id}/volumes", deps.InstanceHandler.Volumes)
 			r.Get("/instances/{id}/stats", deps.InstanceHandler.Stats)
 			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
 			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
 			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)
 			r.Get("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeStatus)
 			r.Delete("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeOff)
+			r.Get("/instances/{id}/tailscale-status", deps.InstanceHandler.TailscaleStatus)
 			r.Get("/instances/{id}/terminal", deps.TerminalHandler.Connect)
 			r.Get("/instances/{id}/creation-stream", deps.TerminalHandler.CreationStream)
 
@@ -106,6 +113,15 @@ func New(deps Deps) *chi.Mux {
 			r.Post("/instances/{id}/secrets", deps.InstanceHandler.CreateSecret)
 			r.Put("/instances/{id}/secrets/{secret_id}", deps.InstanceHandler.UpdateSecret)
 			r.Delete("/instances/{id}/secrets/{secret_id}", deps.InstanceHandler.DeleteSecret)
+
+			// Instance storage (volumes listed via /instances/{id}/volumes above)
+			r.Get("/instances/{id}/storage/browse", deps.StorageHandler.ListDirectory)
+			r.Get("/instances/{id}/storage/download", deps.StorageHandler.DownloadFile)
+			r.Get("/instances/{id}/storage/download-dir", deps.StorageHandler.DownloadDirectory)
+			r.Get("/instances/{id}/storage/volumes/{vol_id}/snapshots", deps.StorageHandler.ListSnapshots)
+			r.Post("/instances/{id}/storage/volumes/{vol_id}/snapshots", deps.StorageHandler.CreateSnapshot)
+			r.Delete("/instances/{id}/storage/volumes/{vol_id}/snapshots/{name}", deps.StorageHandler.DeleteSnapshot)
+			r.Post("/instances/{id}/storage/volumes/{vol_id}/snapshots/{name}/restore", deps.StorageHandler.RestoreSnapshot)
 
 			// Admin routes
 			r.Route("/admin", func(r chi.Router) {
@@ -121,6 +137,7 @@ func New(deps Deps) *chi.Mux {
 				r.Post("/templates/{id}/duplicate", deps.TemplateHandler.Duplicate)
 				r.Get("/templates/{id}/export-yaml", deps.TemplateHandler.ExportYAMLAsJSON)
 				r.Post("/templates/{id}/update-from-yaml", deps.TemplateHandler.UpdateFromYAML)
+				r.Post("/templates/{id}/save-to-disk", deps.TemplateHandler.SaveToDisk)
 				r.Get("/templates/{id}/debug/instance", deps.AdminHandler.GetDebugInstance)
 
 				// Servers
@@ -155,6 +172,19 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/settings/tailscale-key", deps.AdminSettingsHandler.GetTailscaleKey)
 				r.Put("/settings/tailscale-key", deps.AdminSettingsHandler.SetTailscaleKey)
 				r.Delete("/settings/tailscale-key", deps.AdminSettingsHandler.DeleteTailscaleKey)
+
+				// Disks (all volumes, admin view)
+				r.Get("/disks", deps.AdminHandler.ListAllDisks)
+
+				// Git repos
+				r.Get("/repos", deps.RepoHandler.List)
+				r.Post("/repos", deps.RepoHandler.Add)
+				r.Put("/repos/{id}", deps.RepoHandler.Rename)
+				r.Delete("/repos/{id}", deps.RepoHandler.Delete)
+				r.Post("/repos/{id}/sync", deps.RepoHandler.Sync)
+				r.Get("/repos/server-key", deps.RepoHandler.GetServerKey)
+				r.Post("/repos/server-key/generate", deps.RepoHandler.GenerateServerKey)
+				r.Put("/repos/server-key/managed", deps.RepoHandler.SetServerManagedKey)
 			})
 		})
 	})

@@ -208,3 +208,12 @@ func (h *AdminHandler) ReapplySetup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, result)
 }
+
+func (h *AdminHandler) ListAllDisks(w http.ResponseWriter, r *http.Request) {
+	disks, err := queries.ListAllDisks(h.db)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list disks")
+		return
+	}
+	writeJSON(w, http.StatusOK, disks)
+}

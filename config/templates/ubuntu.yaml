@@ -16,9 +16,17 @@ persistence:
       size: 20GB
 terminal_user: ubuntu
 includes:
-#  - tailscale
-#  - sshx
+  - tailscale
+  - sshx
   - docker
-#first_init_commands:
-#  - apt-get update -y
-#  - apt-get install -y git curl wget build-essential
+  - openvscode-server
+first_init_commands:
+  - apt-get update -y
+  - apt-get install -y git curl wget build-essential openssh-server
+  - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+  - systemctl enable ssh
+  - systemctl restart ssh
+
+rebuild_commands:
+  - systemctl enable ssh
+  - systemctl start ssh

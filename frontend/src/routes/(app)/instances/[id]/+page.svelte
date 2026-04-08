@@ -2,10 +2,11 @@
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { instances, admin, templates } from '$lib/api';
-  import type { Instance, Server, InstanceSecret, IncusDetail, IncusConfigUpdate, Template, TailscaleServeResult } from '$lib/api/types';
+  import type { Instance, Server, InstanceSecret, IncusDetail, IncusConfigUpdate, Template, TailscaleServeResult, TailscaleStatusResult, InstanceStorageInfo } from '$lib/api/types';
   import { goto } from '$app/navigation';
   import { addNotification } from '$lib/stores/notifications';
   import Terminal from '$lib/components/Terminal.svelte';
+  import StorageTab from '$lib/components/StorageTab.svelte';
   import { currentUser } from '$lib/stores/auth';
 
   let instance: Instance | null = $state(null);
@@ -40,9 +41,17 @@
   let tsServePort = $state(8080);
   let tsServeLoading = $state(false);
 
-  // Tabs below the main card (admin sees all three, non-admin only sees secrets)
-  let detailTab: 'debug' | 'incus' | 'secrets' = $state('secrets');
-  let debugTab: 'logs' | 'terminal' | 'template' = $state('logs');
+  // Tailscale machine status (DNS name)
+  let tsStatus = $state<TailscaleStatusResult | null>(null);
+
+  // Storage info
+  let storageInfo = $state<InstanceStorageInfo | null>(null);
+
+  // Terminal user toggle (root vs unprivileged)
+  let terminalUser = $state('root');
+
+  // Tabs below the main card
+  let detailTab: 'storage' | 'incus' | 'secrets' | 'sshx' | 'tailscale' | 'openvscode' = $state('storage');
 
   // Creation log stream (while status === 'creating')
   type LogStep = { kind: 'step'; n: number; total: number; label: string; outputs: string[]; warning: string; expanded: boolean };
@@ -52,29 +61,24 @@
   let logItems = $state<LogItem[]>([]);
   let creationLogEl: HTMLDivElement | undefined = $state();
 
-  // Debug log stream
-  let debugLogs = $state('');
-  let debugStreaming = $state(false);
-  let debugWs: WebSocket | null = null;
-
-  // Template editing (within Debug > Template sub-tab)
-  let editingTemplate: Template | null = $state(null);
-  let templateSaving = $state(false);
-
   let id = $derived(Number($page.params.id));
   let isAdmin = $derived($currentUser?.role === 'admin');
   let incusUIUrl = $derived(server ? `${server.endpoint}/ui` : null);
+  let includes = $derived((() => { try { return JSON.parse(template?.includes ?? '[]') as string[]; } catch { return [] as string[]; } })());
+  let hasSshx = $derived(includes.includes('sshx'));
+  let hasTailscale = $derived(includes.includes('tailscale'));
+  let hasVSCode = $derived(includes.includes('openvscode-server'));
 
   async function load() {
     loading = true;
     try {
       instance = await instances.get(id);
-      [instanceSecrets, template] = await Promise.all([
+      [instanceSecrets, template, storageInfo] = await Promise.all([
         instances.listSecrets(id),
-        templates.get(instance.template_id)
+        templates.get(instance.template_id),
+        instances.volumes(id).catch(() => null)
       ]);
       if ($currentUser?.role === 'admin' && instance) {
-        editingTemplate = { ...template! };
         const servers = await admin.servers.list();
         server = servers.find(s => s.id === instance!.server_id) ?? null;
         incusDetail = await admin.instances.incusInfo(id).catch(() => null);
@@ -94,6 +98,7 @@
       if (browser && instance?.status === 'running') {
         loadSshxUrl();
         loadTsServeStatus();
+        loadTsStatus();
       }
     } catch (e: any) {
       addNotification('error', 'Instance not found');
@@ -121,6 +126,11 @@
     } catch { tsServeStatus = null; }
   }
 
+  async function loadTsStatus() {
+    if (!browser || !instance || instance.status !== 'running') return;
+    try { tsStatus = await instances.tailscaleStatus(id); } catch { tsStatus = null; }
+  }
+
   async function startTsServe() {
     if (!tsServePort || tsServePort <= 0) return;
     tsServeLoading = true;
@@ -138,6 +148,16 @@
       await instances.tailscaleServeOff(id);
       tsServeStatus = { status: 'off', url: '', port: 0 };
       addNotification('success', 'Tailscale Serve stopped');
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally { tsServeLoading = false; }
+  }
+
+  async function startVsCodeServe() {
+    tsServeLoading = true;
+    try {
+      tsServeStatus = await instances.tailscaleServe(id, 3463);
+      addNotification('success', 'Tailscale Serve started on port 3463');
     } catch (e: any) {
       addNotification('error', e.message);
     } finally { tsServeLoading = false; }
@@ -195,43 +215,6 @@
       addNotification('error', e.message);
     } finally {
       configSaving = false;
-    }
-  }
-
-  function startDebugLogs() {
-    stopDebugLogs();
-    debugLogs = '';
-    debugStreaming = true;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    debugWs = new WebSocket(`${proto}://${location.host}/api/v1/admin/instances/${id}/debug-logs`);
-    debugWs.onmessage = (e) => {
-      debugLogs += e.data;
-      setTimeout(() => {
-        const el = document.getElementById('inst-debug-log');
-        if (el) el.scrollTop = el.scrollHeight;
-      }, 0);
-    };
-    debugWs.onclose = () => { debugStreaming = false; };
-    debugWs.onerror = () => { debugStreaming = false; debugLogs += '\n[WebSocket error]\n'; };
-  }
-
-  function stopDebugLogs() {
-    debugWs?.close();
-    debugWs = null;
-    debugStreaming = false;
-  }
-
-  async function saveTemplate() {
-    if (!editingTemplate) return;
-    templateSaving = true;
-    try {
-      await admin.templates.update(editingTemplate.id, editingTemplate);
-      template = { ...editingTemplate };
-      addNotification('success', 'Template saved');
-    } catch (e: any) {
-      addNotification('error', e.message);
-    } finally {
-      templateSaving = false;
     }
   }
 
@@ -315,7 +298,7 @@
 
 {#if loading}
   <div class="flex justify-center py-12">
-    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
   </div>
 {:else if instance}
   <div>
@@ -411,69 +394,33 @@
           <p class="text-sm font-medium text-gray-700 mb-1">Terminal</p>
           {#if template?.terminal_user}
             <p class="text-xs text-gray-400 mb-3">
-              Two contexts available — <span class="font-mono text-amber-600">root</span> has full system access,
-              <span class="font-mono text-green-600">{template.terminal_user}</span> is the unprivileged user.
+              Two contexts available — switch between them below.
             </p>
-            <div class="space-y-4">
-              <Terminal instanceId={id} user="root" />
-              <Terminal instanceId={id} user={template.terminal_user} />
+            <div class="flex gap-2 mb-3">
+              <button onclick={() => terminalUser = 'root'}
+                class="px-3 py-1.5 rounded text-sm font-mono font-semibold transition-colors
+                  {terminalUser === 'root'
+                    ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">
+                root
+              </button>
+              <button onclick={() => terminalUser = template?.terminal_user ?? ''}
+                class="px-3 py-1.5 rounded text-sm font-mono font-semibold transition-colors
+                  {terminalUser === template?.terminal_user
+                    ? 'bg-green-100 text-green-800 border border-green-300'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">
+                {template.terminal_user}
+              </button>
             </div>
+            {#key terminalUser}
+              <Terminal instanceId={id} user={terminalUser} />
+            {/key}
           {:else}
             <p class="text-xs text-gray-400 mb-3">
               Connecting as <span class="font-mono text-amber-600">root</span>.
               Set <code class="bg-gray-100 px-1 rounded">terminal_user</code> in the template to also expose a user terminal.
             </p>
             <Terminal instanceId={id} user="root" />
-          {/if}
-        </div>
-      {/if}
-
-      {#if instance.status === 'running' && sshxUrl}
-        <div class="pt-4 border-t">
-          <p class="text-sm font-medium text-gray-700 mb-2">SSHX Collaborative Terminal</p>
-          <div class="flex items-center gap-2">
-            <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{sshxUrl}</div>
-            <a href={sshxUrl} target="_blank" rel="noopener noreferrer"
-              class="px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm whitespace-nowrap">
-              Open ↗
-            </a>
-            <button onclick={() => navigator.clipboard.writeText(sshxUrl).then(() => addNotification('success', 'Copied'))}
-              class="px-3 py-2 border rounded hover:bg-gray-50 text-sm">Copy</button>
-          </div>
-        </div>
-      {/if}
-
-      {#if instance.status === 'running' && tsServeStatus}
-        <div class="pt-4 border-t">
-          <p class="text-sm font-medium text-gray-700 mb-2">Tailscale Serve</p>
-          {#if tsServeStatus.status === 'active' && tsServeStatus.url}
-            <div class="flex items-center gap-2 mb-3">
-              <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
-              <span class="text-sm text-gray-600">Serving port {tsServeStatus.port}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{tsServeStatus.url}</div>
-              <a href={tsServeStatus.url} target="_blank" rel="noopener noreferrer"
-                class="px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm whitespace-nowrap">
-                Open ↗
-              </a>
-              <button onclick={() => navigator.clipboard.writeText(tsServeStatus?.url ?? '').then(() => addNotification('success', 'Copied'))}
-                class="px-3 py-2 border rounded hover:bg-gray-50 text-sm">Copy</button>
-            </div>
-            <button onclick={stopTsServe} disabled={tsServeLoading}
-              class="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm">
-              {tsServeLoading ? 'Stopping…' : 'Stop Serving'}
-            </button>
-          {:else}
-            <div class="flex items-center gap-2">
-              <input type="number" bind:value={tsServePort} min="1" max="65535" placeholder="Port"
-                class="w-24 px-3 py-2 border rounded text-sm font-mono" />
-              <button onclick={startTsServe} disabled={tsServeLoading}
-                class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm">
-                {tsServeLoading ? 'Starting…' : 'Expose Port'}
-              </button>
-            </div>
-            <p class="text-xs text-gray-400 mt-2">Make a local port accessible via your Tailscale network.</p>
           {/if}
         </div>
       {/if}
@@ -499,156 +446,68 @@
 
       <!-- Tab bar -->
       <div class="flex border-b">
+        <button
+          onclick={() => detailTab = 'storage'}
+          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            {detailTab === 'storage' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+        >Storage</button>
         {#if isAdmin}
-          <button
-            onclick={() => detailTab = 'debug'}
-            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
-              {detailTab === 'debug' ? 'border-amber-500 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-800'}"
-          >Debug</button>
           <button
             onclick={() => detailTab = 'incus'}
             class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
-              {detailTab === 'incus' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+              {detailTab === 'incus' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >Incus Detail</button>
         {/if}
         <button
           onclick={() => detailTab = 'secrets'}
           class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
-            {detailTab === 'secrets' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+            {detailTab === 'secrets' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Secrets</button>
+        {#if hasSshx}
+          <button
+            onclick={() => detailTab = 'sshx'}
+            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+              {detailTab === 'sshx' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+          >SSHX</button>
+        {/if}
+        {#if hasTailscale}
+          <button
+            onclick={() => detailTab = 'tailscale'}
+            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+              {detailTab === 'tailscale' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+          >Tailscale</button>
+        {/if}
+        {#if hasVSCode}
+          <button
+            onclick={() => detailTab = 'openvscode'}
+            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+              {detailTab === 'openvscode' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+          >OpenVSCode</button>
+        {/if}
       </div>
 
-      <!-- ── Debug tab ── -->
-      {#if detailTab === 'debug' && isAdmin}
-        <div class="bg-gray-950">
-
-          <!-- Debug sub-tab bar -->
-          <div class="flex border-b border-gray-800">
-            <button
-              onclick={() => debugTab = 'logs'}
-              class="px-5 py-3 text-sm font-medium transition-colors
-                {debugTab === 'logs' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-gray-400 hover:text-gray-200'}"
-            >Logs</button>
-            <button
-              onclick={() => debugTab = 'terminal'}
-              class="px-5 py-3 text-sm font-medium transition-colors
-                {debugTab === 'terminal' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-gray-400 hover:text-gray-200'}"
-            >Terminal</button>
-            <button
-              onclick={() => { debugTab = 'template'; if (template) editingTemplate = { ...template }; }}
-              class="px-5 py-3 text-sm font-medium transition-colors
-                {debugTab === 'template' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-gray-400 hover:text-gray-200'}"
-            >Template</button>
-            <div class="flex-1"></div>
-            <span class="flex items-center px-4 text-xs text-gray-600 font-mono">{instance.incus_name}</span>
+      <!-- ── Storage tab ── -->
+      {#if detailTab === 'storage'}
+        {#if storageInfo}
+          <div class="flex items-center gap-2 px-6 pt-4">
+            {#if storageInfo.persistence_mode === 'ephemeral'}
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Ephemeral</span>
+              <span class="text-sm text-gray-500">All storage is instance-local. Data is lost on rebuild or delete.</span>
+            {:else}
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Persistent</span>
+              <span class="text-sm text-gray-500">Volumes survive rebuilds. Only delete destroys data.</span>
+            {/if}
           </div>
-
-          <!-- Logs sub-tab -->
-          {#if debugTab === 'logs'}
-            <div class="px-4 py-3 border-b border-gray-800 flex items-center gap-3">
-              {#if !debugStreaming}
-                <button onclick={startDebugLogs}
-                  class="px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 text-sm font-medium">
-                  Stream cloud-init log
-                </button>
-                {#if debugLogs}
-                  <button onclick={() => debugLogs = ''}
-                    class="px-3 py-1.5 border border-gray-700 text-gray-400 rounded hover:text-gray-200 text-sm">Clear</button>
-                {/if}
-              {:else}
-                <div class="flex items-center gap-2">
-                  <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span class="text-sm text-green-400 font-medium">Streaming</span>
-                </div>
-                <button onclick={stopDebugLogs}
-                  class="px-3 py-1.5 bg-red-700 text-white rounded hover:bg-red-600 text-sm">Stop</button>
-                <button onclick={() => debugLogs = ''}
-                  class="px-3 py-1.5 border border-gray-700 text-gray-400 rounded hover:text-gray-200 text-sm">Clear</button>
-              {/if}
-            </div>
-            <pre
-              id="inst-debug-log"
-              class="p-4 text-xs font-mono text-green-400 leading-relaxed whitespace-pre-wrap break-words overflow-y-auto"
-              style="min-height: 320px; max-height: 600px;"
-            >{debugLogs || 'Click "Stream cloud-init log" to tail /var/log/cloud-init-output.log'}</pre>
-          {/if}
-
-          <!-- Terminal sub-tab -->
-          {#if debugTab === 'terminal'}
-            <div class="p-4">
-              {#if instance.status === 'running'}
-                <Terminal instanceId={id} user="root" label="root (admin)" />
-              {:else}
-                <p class="text-sm text-gray-500 p-2">Instance must be running to open a terminal.</p>
-              {/if}
-            </div>
-          {/if}
-
-          <!-- Template sub-tab -->
-          {#if debugTab === 'template' && editingTemplate}
-            <div class="p-6 bg-white">
-              <div class="space-y-4 max-w-2xl">
-                <div class="grid grid-cols-2 gap-4">
-                  <div>
-                    <label for="dbg-tmpl-name" class="block text-xs text-gray-500 mb-1">Name</label>
-                    <input id="dbg-tmpl-name" type="text" bind:value={editingTemplate.name}
-                      class="w-full px-3 py-2 border rounded text-sm" />
-                  </div>
-                  <div>
-                    <label for="dbg-tmpl-slug" class="block text-xs text-gray-500 mb-1">Slug</label>
-                    <input id="dbg-tmpl-slug" type="text" bind:value={editingTemplate.slug}
-                      class="w-full px-3 py-2 border rounded text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <label for="dbg-tmpl-desc" class="block text-xs text-gray-500 mb-1">Description</label>
-                  <input id="dbg-tmpl-desc" type="text" bind:value={editingTemplate.description}
-                    class="w-full px-3 py-2 border rounded text-sm" />
-                </div>
-                <div>
-                  <label for="dbg-tmpl-image" class="block text-xs text-gray-500 mb-1">Image</label>
-                  <input id="dbg-tmpl-image" type="text" bind:value={editingTemplate.image}
-                    class="w-full px-3 py-2 border rounded text-sm font-mono" />
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                  <div>
-                    <label for="dbg-tmpl-profiles" class="block text-xs text-gray-500 mb-1">Profiles (JSON array)</label>
-                    <input id="dbg-tmpl-profiles" type="text" bind:value={editingTemplate.profiles}
-                      class="w-full px-3 py-2 border rounded text-sm font-mono" />
-                  </div>
-                  <div>
-                    <label for="dbg-tmpl-resources" class="block text-xs text-gray-500 mb-1">Resources (JSON object)</label>
-                    <input id="dbg-tmpl-resources" type="text" bind:value={editingTemplate.resources}
-                      class="w-full px-3 py-2 border rounded text-sm font-mono" />
-                  </div>
-                </div>
-                <div>
-                  <label for="dbg-tmpl-term-user" class="block text-xs text-gray-500 mb-1">Terminal User (non-root login)</label>
-                  <input id="dbg-tmpl-term-user" type="text" bind:value={editingTemplate.terminal_user}
-                    class="w-full px-3 py-2 border rounded text-sm font-mono" placeholder="e.g. ubuntu" />
-                </div>
-                <div>
-                  <label for="dbg-tmpl-ci" class="block text-xs text-gray-500 mb-1">Cloud-Init</label>
-                  <textarea id="dbg-tmpl-ci" bind:value={editingTemplate.cloud_init} rows="12"
-                    class="w-full px-3 py-2 border rounded text-sm font-mono"></textarea>
-                </div>
-                <div class="flex items-center gap-4 pt-1">
-                  <label class="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" bind:checked={editingTemplate.is_active} />
-                    Active
-                  </label>
-                  <button onclick={saveTemplate} disabled={templateSaving}
-                    class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm">
-                    {templateSaving ? 'Saving…' : 'Save Template'}
-                  </button>
-                  <button onclick={() => editingTemplate = template ? { ...template } : null}
-                    class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Reset</button>
-                </div>
-              </div>
-            </div>
-          {/if}
-
-        </div>
+          <StorageTab
+            instanceId={id}
+            instanceStatus={instance?.status ?? 'stopped'}
+            storageVolumes={storageInfo.volumes}
+          />
+        {:else}
+          <div class="p-6">
+            <p class="text-sm text-gray-500">Storage information not available.</p>
+          </div>
+        {/if}
       {/if}
 
       <!-- ── Incus Detail tab ── -->
@@ -659,7 +518,7 @@
               <h3 class="text-base font-semibold">Incus Detail</h3>
               {#if incusUIUrl}
                 <a href={incusUIUrl} target="_blank" rel="noopener noreferrer"
-                  class="px-3 py-1 rounded text-sm font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100">
+                  class="px-3 py-1 rounded text-sm font-medium bg-primary-50 text-primary-dark border border-primary/20 hover:bg-primary-50">
                   Open Incus UI ↗
                 </a>
               {/if}
@@ -799,7 +658,7 @@
               </div>
               <p class="text-xs text-gray-400 mt-2">Empty value removes the key from Incus config (reverts to profile default).</p>
               <button onclick={applyIncusConfig} disabled={configSaving}
-                class="mt-3 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 text-sm">
+                class="mt-3 px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm">
                 {configSaving ? 'Applying…' : 'Apply'}
               </button>
             </div>
@@ -833,10 +692,154 @@
           <div class="border-t pt-4 space-y-2">
             <input bind:value={newSecretName} placeholder="SECRET_NAME" class="w-full px-3 py-2 border rounded text-sm" />
             <input bind:value={newSecretValue} type="password" placeholder="Secret value" class="w-full px-3 py-2 border rounded text-sm" />
-            <button onclick={addSecret} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm">
+            <button onclick={addSecret} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm">
               Add Secret
             </button>
           </div>
+        </div>
+      {/if}
+
+      <!-- ── SSHX tab ── -->
+      {#if detailTab === 'sshx'}
+        <div class="p-6">
+          <h3 class="text-base font-semibold mb-4">SSHX Collaborative Terminal</h3>
+          {#if sshxUrl}
+            <div class="flex items-center gap-2">
+              <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{sshxUrl}</div>
+              <button onclick={() => navigator.clipboard.writeText(sshxUrl).then(() => addNotification('success', 'Copied'))}
+                class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
+              <a href={sshxUrl} target="_blank" rel="noopener noreferrer"
+                class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm whitespace-nowrap">
+                Open ↗
+              </a>
+            </div>
+          {:else}
+            <div class="flex items-center gap-2 text-sm text-gray-500">
+              <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary shrink-0"></div>
+              <span>Waiting for SSHX service to start…</span>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- ── Tailscale tab ── -->
+      {#if detailTab === 'tailscale'}
+        <div class="p-6 space-y-6">
+          <div>
+            <h3 class="text-base font-semibold mb-3">Machine</h3>
+            {#if tsStatus?.connected && tsStatus.dns_name}
+              <div class="flex items-center gap-2 mb-3">
+                <span class="inline-block w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                <span class="text-sm text-gray-600">Connected</span>
+              </div>
+              <div class="space-y-2">
+                {#if tsStatus.machine_name}
+                  <div>
+                    <p class="text-xs text-gray-500 mb-1">Machine name</p>
+                    <div class="flex items-center gap-2">
+                      <div class="flex-1 p-2 bg-gray-50 rounded font-mono text-sm">{tsStatus.machine_name}</div>
+                      <button onclick={() => navigator.clipboard.writeText(tsStatus?.machine_name ?? '').then(() => addNotification('success', 'Copied'))}
+                        class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
+                    </div>
+                  </div>
+                {/if}
+                <div>
+                  <p class="text-xs text-gray-500 mb-1">Magic DNS name</p>
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 p-2 bg-gray-50 rounded font-mono text-sm break-all">{tsStatus.dns_name}</div>
+                    <button onclick={() => navigator.clipboard.writeText(tsStatus?.dns_name ?? '').then(() => addNotification('success', 'Copied'))}
+                      class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
+                  </div>
+                </div>
+                {#if hasVSCode}
+                  <div class="pt-2 border-t">
+                    <p class="text-xs text-gray-500 mb-2">Services</p>
+                    <a href={`http://${tsStatus.dns_name}:3463`} target="_blank" rel="noopener noreferrer"
+                      class="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 text-sm font-mono">
+                      {tsStatus.dns_name}:3463 ↗
+                    </a>
+                  </div>
+                {/if}
+              </div>
+            {:else}
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-gray-400 shrink-0"></span>
+                <span class="text-sm text-gray-500">Not connected</span>
+              </div>
+            {/if}
+          </div>
+
+          <div class="border-t pt-6">
+            <h3 class="text-base font-semibold mb-3">Tailscale Serve</h3>
+            {#if tsServeStatus?.status === 'active' && tsServeStatus.url}
+              <div class="flex items-center gap-2 mb-3">
+                <span class="inline-block w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                <span class="text-sm text-gray-600">Serving port {tsServeStatus.port}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{tsServeStatus.url}</div>
+                <a href={tsServeStatus.url} target="_blank" rel="noopener noreferrer"
+                  class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm whitespace-nowrap">
+                  Open ↗
+                </a>
+                <button onclick={() => navigator.clipboard.writeText(tsServeStatus?.url ?? '').then(() => addNotification('success', 'Copied'))}
+                  class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
+              </div>
+              <button onclick={stopTsServe} disabled={tsServeLoading}
+                class="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm">
+                {tsServeLoading ? 'Stopping…' : 'Stop Serving'}
+              </button>
+            {:else}
+              <div class="flex items-center gap-2">
+                <input type="number" bind:value={tsServePort} min="1" max="65535" placeholder="Port"
+                  class="w-24 px-3 py-2 border rounded text-sm font-mono" />
+                <button onclick={startTsServe} disabled={tsServeLoading}
+                  class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm">
+                  {tsServeLoading ? 'Starting…' : 'Expose Port'}
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 mt-2">Make a local port accessible via your Tailscale network.</p>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
+      <!-- ── OpenVSCode tab ── -->
+      {#if detailTab === 'openvscode'}
+        {@const vsHost = (tsStatus?.connected && tsStatus.dns_name) ? tsStatus.dns_name : instance.ip_address}
+        {@const termUser = template?.terminal_user || 'root'}
+        {@const workspaceDir = (() => { try { const dirs = JSON.parse(template?.persistence_dirs ?? '[]') as {path: string}[]; return dirs[0]?.path ?? '/workspace'; } catch { return '/workspace'; } })()}
+        <div class="p-6 space-y-4">
+          <h3 class="text-base font-semibold">OpenVSCode Server</h3>
+
+          {#if vsHost}
+            <!-- Direct link — always shown -->
+            <div>
+              <p class="text-xs text-gray-500 mb-2">Open in browser</p>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 p-2 bg-gray-50 rounded font-mono text-sm break-all">http://{vsHost}:3463</div>
+                <a href={`http://${vsHost}:3463`} target="_blank" rel="noopener noreferrer"
+                  class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm whitespace-nowrap">
+                  Open ↗
+                </a>
+              </div>
+            </div>
+
+            <!-- VSCode Desktop deep link — only when we have a DNS name for SSH -->
+            {#if tsStatus?.connected && tsStatus.dns_name}
+              <div>
+                <p class="text-xs text-gray-500 mb-2">Open in VSCode Desktop</p>
+                <a href={`vscode://vscode-remote/ssh-remote+${termUser}@${tsStatus.dns_name}${workspaceDir}`}
+                  class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm">
+                  Open in VSCode Desktop
+                </a>
+                <p class="text-xs text-gray-400 mt-1">Connects via SSH to <span class="font-mono">{termUser}@{tsStatus.dns_name}</span></p>
+                <p class="text-xs text-gray-400 mt-1">Opens in existing window? Set <span class="font-mono">"window.openFoldersInNewWindow": "on"</span> in VS Code settings.</p>
+              </div>
+            {/if}
+          {:else}
+            <p class="text-sm text-gray-500">Instance not running or no address available.</p>
+          {/if}
         </div>
       {/if}
 

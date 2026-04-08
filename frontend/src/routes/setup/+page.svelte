@@ -111,8 +111,8 @@
             <div class="flex flex-col items-center">
               <div
                 class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
-                  {i + 1 === step ? 'bg-indigo-600 text-white' :
-                   i + 1 < step ? 'bg-indigo-100 text-indigo-600' :
+                  {i + 1 === step ? 'bg-primary text-white' :
+                   i + 1 < step ? 'bg-primary-50 text-primary' :
                    'bg-gray-100 text-gray-400'}"
               >
                 {#if i + 1 < step}
@@ -121,10 +121,10 @@
                   {i + 1}
                 {/if}
               </div>
-              <span class="text-xs mt-1 {i + 1 <= step ? 'text-indigo-600' : 'text-gray-400'}">{label}</span>
+              <span class="text-xs mt-1 {i + 1 <= step ? 'text-primary' : 'text-gray-400'}">{label}</span>
             </div>
             {#if i < steps.length - 1}
-              <div class="w-12 h-px mx-1 mb-4 {i + 1 < step ? 'bg-indigo-300' : 'bg-gray-200'}"></div>
+              <div class="w-12 h-px mx-1 mb-4 {i + 1 < step ? 'bg-primary' : 'bg-gray-200'}"></div>
             {/if}
           </div>
         {/each}
@@ -144,7 +144,7 @@
             type="password"
             bind:value={adminPassword}
             placeholder="Minimum 8 characters"
-            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
           />
         </div>
         <div>
@@ -154,7 +154,7 @@
             type="password"
             bind:value={adminConfirm}
             placeholder="Re-enter your password"
-            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
           />
         </div>
         {#if passwordError}
@@ -166,7 +166,7 @@
         <button
           onclick={nextStep}
           disabled={!step1Valid}
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next
         </button>
@@ -180,7 +180,7 @@
       </p>
 
       <label class="flex items-center gap-3 mb-6 cursor-pointer">
-        <input type="checkbox" bind:checked={entraEnabled} class="w-4 h-4 rounded text-indigo-600" />
+        <input type="checkbox" bind:checked={entraEnabled} class="w-4 h-4 rounded text-primary" />
         <span class="text-sm font-medium text-gray-700">Enable Entra ID authentication</span>
       </label>
 
@@ -193,7 +193,7 @@
               type="text"
               bind:value={entraClientId}
               placeholder="Application (client) ID"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
           <div>
@@ -203,7 +203,7 @@
               type="password"
               bind:value={entraClientSecret}
               placeholder="Client secret value"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
           <div>
@@ -213,7 +213,7 @@
               type="text"
               bind:value={entraTenantId}
               placeholder="Directory (tenant) ID"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
         </div>
@@ -226,7 +226,7 @@
         <button
           onclick={nextStep}
           disabled={!step2Valid}
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {entraEnabled ? 'Next' : 'Skip'}
         </button>
@@ -240,7 +240,7 @@
       </p>
 
       <label class="flex items-center gap-3 mb-6 cursor-pointer">
-        <input type="checkbox" bind:checked={serverEnabled} class="w-4 h-4 rounded text-indigo-600" />
+        <input type="checkbox" bind:checked={serverEnabled} class="w-4 h-4 rounded text-primary" />
         <span class="text-sm font-medium text-gray-700">Add an Incus server now</span>
       </label>
 
@@ -253,7 +253,7 @@
               type="text"
               bind:value={serverName}
               placeholder="local"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
           <div>
@@ -263,7 +263,7 @@
               type="text"
               bind:value={serverEndpoint}
               placeholder="https://127.0.0.1:8443"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
           <div class="grid grid-cols-2 gap-4">
@@ -274,7 +274,7 @@
                 type="text"
                 bind:value={serverTlsCert}
                 placeholder="~/.config/incus/client.crt"
-                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               />
             </div>
             <div>
@@ -284,7 +284,7 @@
                 type="text"
                 bind:value={serverTlsKey}
                 placeholder="~/.config/incus/client.key"
-                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               />
             </div>
           </div>
@@ -295,7 +295,7 @@
               type="number"
               bind:value={serverMaxInstances}
               min="1"
-              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
         </div>
@@ -308,7 +308,7 @@
         <button
           onclick={nextStep}
           disabled={!step3Valid}
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {serverEnabled ? 'Next' : 'Skip'}
         </button>
@@ -360,7 +360,7 @@
         <button
           onclick={completeSetup}
           disabled={submitting}
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50"
         >
           {submitting ? 'Setting up...' : 'Complete Setup'}
         </button>
@@ -397,7 +397,7 @@
 
         <button
           onclick={() => { window.location.href = '/login'; }}
-          class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark"
         >
           Go to Login
         </button>

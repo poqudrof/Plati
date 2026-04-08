@@ -3,9 +3,14 @@ files:
   - src: sshx.service
     dest: /etc/systemd/system/sshx.service
     mode: "0644"
+  - src: dist/sshx-linux-amd64
+    dest: /usr/local/bin/sshx
+    mode: "0755"
+# online fallback (requires curl):
+#post_create_commands:
+#  - apt-get install -y -q curl
+#  - curl -sSf https://sshx.io/get | sh
 post_create_commands:
-  - apt-get install -y -q curl
-  - curl -sSf https://sshx.io/get | sh
   - systemctl daemon-reload
   - systemctl enable sshx
   - systemctl start sshx

@@ -12,6 +12,7 @@
   let { children }: { children: Snippet } = $props();
   let initialized = $state(false);
   let isSetupRoute = $derived($page.url.pathname === '/setup');
+  let isLandingRoute = $derived($page.url.pathname === '/landing');
 
   $effect(() => {
     if (browser && !initialized) {
@@ -47,9 +48,9 @@
 </script>
 
 <Notifications />
-{#if !isSetupRoute}
+{#if !isSetupRoute && !isLandingRoute}
   <Navbar />
 {/if}
-<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<main class={isLandingRoute ? '' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
   {@render children()}
 </main>

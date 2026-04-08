@@ -84,7 +84,7 @@
         {instance.status}
       </span>
       <a href="/instances/{instance.id}"
-        class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700">
+        class="px-3 py-1.5 bg-primary text-white rounded text-sm font-medium hover:bg-primary-dark">
         View →
       </a>
     </div>

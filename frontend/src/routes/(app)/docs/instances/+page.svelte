@@ -3,7 +3,7 @@
 
 <div class="max-w-3xl">
   <div class="mb-6">
-    <a href="/docs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Docs</a>
+    <a href="/docs" class="text-sm text-primary hover:text-primary-dark">&larr; Back to Docs</a>
   </div>
 
   <h1 class="text-2xl font-bold mb-2">Instances</h1>
@@ -30,7 +30,7 @@
       <pre class="bg-gray-50 rounded p-3 text-xs font-mono">ssh ubuntu@&lt;instance-ip&gt;</pre>
       <p>The exact command is shown on the instance detail page. For it to work:</p>
       <ul class="list-disc list-inside space-y-1 ml-2">
-        <li>Add your SSH public key in <a href="/settings" class="text-indigo-600 underline">Settings</a> <b>before</b> creating the instance (keys are injected at creation time via cloud-init).</li>
+        <li>Add your SSH public key in <a href="/settings" class="text-primary underline">Settings</a> <b>before</b> creating the instance (keys are injected at creation time via cloud-init).</li>
         <li>If you added a key after creating the instance, <b>rebuild</b> it to inject the new key.</li>
         <li>The default user depends on the image. Ubuntu images use <code class="bg-gray-100 px-1 rounded">ubuntu</code>, Debian uses <code class="bg-gray-100 px-1 rounded">debian</code>, etc.</li>
       </ul>

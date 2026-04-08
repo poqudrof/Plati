@@ -1,0 +1,74 @@
+name: Simple Web Server
+slug: simple-webserver
+description: Minimal Python web server for E2E testing (port 3000, /health endpoint).
+image: images:ubuntu/24.04/cloud
+profiles:
+  - default
+resources:
+  cpu: 1
+  memory: 1GB
+persistence:
+  mode: ephemeral
+terminal_user: ubuntu
+includes:
+  - tailscale
+
+first_init_commands:
+  - apt-get update -y -q
+  - apt-get install -y -q python3 curl openssh-server
+  - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+  - systemctl enable ssh && systemctl restart ssh
+  - |
+    cat > /opt/webserver.py << 'PYEOF'
+    import http.server
+    import json
+    import os
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/health':
+                body = json.dumps({"status": "ok", "hostname": os.uname().nodename})
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body.encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b'<h1>Hello from Plati!</h1>')
+
+        def log_message(self, fmt, *args):
+            pass  # silence request logs in journal
+
+    http.server.HTTPServer(('', 3000), Handler).serve_forever()
+    PYEOF
+  - |
+    cat > /etc/systemd/system/webserver.service << 'EOF'
+    [Unit]
+    Description=Simple Python Web Server
+    After=network.target
+
+    [Service]
+    ExecStart=/usr/bin/python3 /opt/webserver.py
+    Restart=always
+    RestartSec=2
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+  - systemctl daemon-reload
+  - systemctl enable --now webserver
+
+rebuild_commands:
+  - systemctl restart webserver
+
+health_checks:
+  - port: 3000
+    path: /health
+    expected_status: 200
+    timeout: 120
+    description: Python web server health endpoint
+
+tailscale_serve:
+  port: 3000

@@ -23,19 +23,25 @@ type InstanceService struct {
 	userSvc      *UserService
 	prefSvc      *PreferencesService
 	adminSvc     *AdminSettingsService
+	repoSvc      *RepoService
+	templateSvc  *TemplateService
 	creationLogs *CreationLogManager
 	keysDir      string
+	reposDir     string
 }
 
-func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, prefSvc *PreferencesService, adminSvc *AdminSettingsService, keysDir string) *InstanceService {
+func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, prefSvc *PreferencesService, adminSvc *AdminSettingsService, keysDir string, reposDir string, repoSvc *RepoService, templateSvc *TemplateService) *InstanceService {
 	return &InstanceService{
 		db:           db,
 		pool:         pool,
 		userSvc:      userSvc,
 		prefSvc:      prefSvc,
 		adminSvc:     adminSvc,
+		repoSvc:      repoSvc,
+		templateSvc:  templateSvc,
 		creationLogs: NewCreationLogManager(),
 		keysDir:      keysDir,
+		reposDir:     reposDir,
 	}
 }
 
@@ -169,6 +175,56 @@ func effectiveMode(override, pref string) string {
 		return override
 	}
 	return pref
+}
+
+// mixinFileStepsForTemplate returns PushFile setup steps for all mixin files declared
+// in the template's Includes field. Falls back to nil if templateSvc is unset.
+func (s *InstanceService) mixinFileStepsForTemplate(includesJSON string) []incus.SetupStep {
+	if s.templateSvc == nil || includesJSON == "" || includesJSON == "[]" {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(includesJSON), &names); err != nil || len(names) == 0 {
+		return nil
+	}
+	return s.templateSvc.GetMixinFileSteps(names)
+}
+
+// attachReposDirAndBuildCmds binds /plati-repos into the instance (if the template has repos
+// configured and reposDir is set), and returns repo copy commands to prepend to firstInitCmds.
+func (s *InstanceService) attachReposDirAndBuildCmds(client incus.IncusClient, incusName string, reposJSON string) []string {
+	if s.reposDir == "" || reposJSON == "" || reposJSON == "[]" {
+		return nil
+	}
+	var repoRefs []models.TemplateRepoRef
+	if err := json.Unmarshal([]byte(reposJSON), &repoRefs); err != nil || len(repoRefs) == 0 {
+		return nil
+	}
+
+	if err := client.AttachHostPath(incusName, "plati-repos", s.reposDir, "/plati-repos"); err != nil {
+		log.Printf("warning: attach repos dir to %s: %v", incusName, err)
+	}
+
+	var cmds []string
+	for _, ref := range repoRefs {
+		repo, err := queries.GetGitRepoByName(s.db, ref.Name)
+		if err != nil || repo.CloneStatus != "ready" {
+			// Fall back to filesystem: if the directory exists in reposDir, still copy it.
+			dirPath := filepath.Join(s.reposDir, ref.Name)
+			if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
+				log.Printf("repo %q not in DB, falling back to filesystem copy", ref.Name)
+				cmds = append(cmds, fmt.Sprintf("cp -rp /plati-repos/%s %s", ref.Name, ref.Dest))
+			} else {
+				log.Printf("warning: repo %q not ready (status=%v), skipping copy command", ref.Name, err)
+			}
+			continue
+		}
+		cmds = append(cmds,
+			fmt.Sprintf("cp -rp /plati-repos/%s %s", repo.Name, ref.Dest),
+			fmt.Sprintf("cd %s && git remote set-url origin %s", ref.Dest, repo.SSHURL),
+		)
+	}
+	return cmds
 }
 
 func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, error) {
@@ -346,6 +402,7 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 		RebuildCmds:    rebuildCmds,
 		PostCreateCmds: postCmds,
 		SentinelPath:   sentinelPath,
+		MixinFileSteps: s.mixinFileStepsForTemplate(tmpl.Includes),
 	}, nil)
 
 	return inst, nil
@@ -487,6 +544,9 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 			}
 		}
 
+		// Attach repos dir and build copy commands.
+		repoCopyCmds := s.attachReposDirAndBuildCmds(client, incusName, tmpl.Repos)
+
 		logFn("Starting instance...")
 		if err := client.StartInstance(incusName); err != nil {
 			log.Printf("CreateAsync: start instance %s: %v", incusName, err)
@@ -523,6 +583,7 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 		json.Unmarshal([]byte(tmpl.FirstInitCommands), &firstInitCmds)
 		json.Unmarshal([]byte(tmpl.RebuildCommands), &rebuildCmds)
 		json.Unmarshal([]byte(tmpl.PostCreateCommands), &postCmds)
+		firstInitCmds = append(repoCopyCmds, firstInitCmds...)
 
 		s.runPhase2Setup(client, incusName, publicKeys, privateKeys, secretsEnv, tmpl.TerminalUser, incus.SetupConfig{
 			PublicKeys:     publicKeys,
@@ -534,6 +595,7 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 			RebuildCmds:    rebuildCmds,
 			PostCreateCmds: postCmds,
 			SentinelPath:   sentinelPath,
+			MixinFileSteps: s.mixinFileStepsForTemplate(tmpl.Includes),
 		}, logFn)
 
 		logFn("Setup complete. Instance is ready.")
@@ -680,6 +742,9 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 		}
 	}
 
+	// Reattach repos dir bind mount.
+	repoCopyCmds := s.attachReposDirAndBuildCmds(client, inst.IncusName, tmpl.Repos)
+
 	// Start
 	if err := client.StartInstance(inst.IncusName); err != nil {
 		queries.UpdateInstanceStatus(s.db, id, "error")
@@ -707,6 +772,9 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 	json.Unmarshal([]byte(tmpl.FirstInitCommands), &firstInitCmds)
 	json.Unmarshal([]byte(tmpl.RebuildCommands), &rebuildCmds)
 	json.Unmarshal([]byte(tmpl.PostCreateCommands), &postCmds)
+	if isFirstInit {
+		firstInitCmds = append(repoCopyCmds, firstInitCmds...)
+	}
 
 	s.runPhase2Setup(client, inst.IncusName, publicKeys, privateKeys, secretsEnv, tmpl.TerminalUser, incus.SetupConfig{
 		PublicKeys:     publicKeys,
@@ -718,6 +786,7 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 		RebuildCmds:    rebuildCmds,
 		PostCreateCmds: postCmds,
 		SentinelPath:   sentinelPath,
+		MixinFileSteps: s.mixinFileStepsForTemplate(tmpl.Includes),
 	}, nil)
 
 	queries.UpdateInstanceStatus(s.db, id, "running")
@@ -829,6 +898,45 @@ func (s *InstanceService) DeleteInstanceSecret(id, instanceID, userID int64) err
 // SshxURLResult holds the collaborative terminal URL for an sshx instance.
 type SshxURLResult struct {
 	URL string `json:"url"`
+}
+
+// InstanceStorageInfo describes the storage layout of an instance.
+type InstanceStorageInfo struct {
+	PersistenceMode string               `json:"persistence_mode"`
+	Volumes         []models.VolumeDetail `json:"volumes"`
+}
+
+// GetStorageInfo returns persistence mode and attached volumes for an instance.
+func (s *InstanceService) GetStorageInfo(id, userID int64) (*InstanceStorageInfo, error) {
+	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+
+	tmpl, err := queries.GetTemplate(s.db, inst.TemplateID)
+	if err != nil {
+		return nil, fmt.Errorf("template not found: %w", err)
+	}
+
+	volumes, err := queries.ListInstanceVolumesWithDetails(s.db, inst.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load volumes: %w", err)
+	}
+
+	// Legacy fallback: instances created before multi-volume support may only have volume_id set.
+	if len(volumes) == 0 && inst.VolumeID.Valid {
+		if v, err := queries.GetVolume(s.db, inst.VolumeID.Int64); err == nil {
+			volumes = []models.VolumeDetail{{
+				VolumeID: v.ID, MountPath: "/workspace", DeviceName: "workspace",
+				VolumeName: v.Name, Pool: v.Pool, SizeGB: v.SizeGB, CreatedAt: v.CreatedAt,
+			}}
+		}
+	}
+
+	return &InstanceStorageInfo{
+		PersistenceMode: tmpl.PersistenceMode,
+		Volumes:         volumes,
+	}, nil
 }
 
 // InstanceStats holds workspace metrics fetched by running commands inside the instance.
@@ -1063,6 +1171,61 @@ func (s *InstanceService) TailscaleServeOff(id, userID int64) error {
 	return nil
 }
 
+// TailscaleStatusResult holds the Tailscale machine status for an instance.
+type TailscaleStatusResult struct {
+	Connected   bool   `json:"connected"`
+	DNSName     string `json:"dns_name"`
+	MachineName string `json:"machine_name"`
+}
+
+// GetTailscaleStatus returns the Tailscale machine's Magic DNS name and connection status.
+func (s *InstanceService) GetTailscaleStatus(id, userID int64) (*TailscaleStatusResult, error) {
+	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+	if inst.Status != "running" {
+		return nil, fmt.Errorf("instance not running")
+	}
+	server, err := queries.GetServer(s.db, inst.ServerID)
+	if err != nil {
+		return nil, fmt.Errorf("server not found: %w", err)
+	}
+	client, err := s.pool.GetClient(server.Name)
+	if err != nil {
+		return nil, fmt.Errorf("get incus client: %w", err)
+	}
+
+	// Collapse whitespace so the grep works regardless of whether tailscale
+	// emits compact JSON ("DNSName":"...") or spaced JSON ("DNSName": "...").
+	script := `JSON=$(tailscale status --json 2>/dev/null | tr -d ' \n'); DNS=$(echo "$JSON" | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4); HOST=$(echo "$JSON" | grep -o '"HostName":"[^"]*"' | head -1 | cut -d'"' -f4); DNS=$(echo "$DNS" | sed 's/\.$//' ); echo "dns=$DNS"; echo "host=$HOST"`
+	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", script})
+	if err != nil {
+		log.Printf("tailscale-status exec %s: %v", inst.IncusName, err)
+		return &TailscaleStatusResult{}, nil
+	}
+
+	result := &TailscaleStatusResult{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "dns":
+			dns := strings.TrimSpace(v)
+			dns = strings.TrimSuffix(dns, ".")
+			if dns != "" {
+				result.DNSName = dns
+				result.Connected = true
+			}
+		case "host":
+			result.MachineName = strings.TrimSpace(v)
+		}
+	}
+	return result, nil
+}
+
 // Duplicate creates a new instance using the same template as the source,
 // then deep-copies volume data from source to destination.
 func (s *InstanceService) Duplicate(id, userID int64) (*models.Instance, error) {
@@ -1200,6 +1363,14 @@ func (s *InstanceService) runPhase2Setup(client incus.IncusClient, incusName str
 		var err error
 		if len(step.FileContent) > 0 {
 			err = client.PushFile(incusName, step.FileDest, step.FileContent, step.FileUID, step.FileGID, step.FileMode)
+		} else if step.FileSourcePath != "" {
+			var content []byte
+			content, err = os.ReadFile(step.FileSourcePath)
+			if err != nil {
+				err = fmt.Errorf("read mixin file %s: %w", step.FileSourcePath, err)
+			} else {
+				err = client.PushFile(incusName, step.FileDest, content, step.FileUID, step.FileGID, step.FileMode)
+			}
 		} else {
 			out, err = client.RunCommand(incusName, step.Cmd)
 		}

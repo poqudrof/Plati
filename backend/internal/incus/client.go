@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -204,6 +206,30 @@ func (c *Client) DetachVolume(instanceName, deviceName string) error {
 	return op.Wait()
 }
 
+// AttachHostPath bind-mounts a host filesystem path into the instance (read-only).
+func (c *Client) AttachHostPath(instanceName, deviceName, hostPath, instancePath string) error {
+	inst, etag, err := c.server.GetInstance(instanceName)
+	if err != nil {
+		return fmt.Errorf("get instance for host path attach: %w", err)
+	}
+
+	if inst.Devices == nil {
+		inst.Devices = map[string]map[string]string{}
+	}
+	inst.Devices[deviceName] = map[string]string{
+		"type":     "disk",
+		"source":   hostPath,
+		"path":     instancePath,
+		"readonly": "true",
+	}
+
+	op, err := c.server.UpdateInstance(instanceName, inst.Writable(), etag)
+	if err != nil {
+		return fmt.Errorf("attach host path: %w", err)
+	}
+	return op.Wait()
+}
+
 func (c *Client) UpdateInstanceConfig(name string, config map[string]string) error {
 	inst, etag, err := c.server.GetInstance(name)
 	if err != nil {
@@ -364,4 +390,119 @@ func (c *Client) GetServerResources() (*incusapi.Resources, error) {
 		return nil, fmt.Errorf("get server resources: %w", err)
 	}
 	return resources, nil
+}
+
+// ListDirectory lists files/directories at the given path inside the instance.
+// Uses find with -printf to get type, size, mtime, and name in a single exec call.
+func (c *Client) ListDirectory(instanceName, path string) ([]FileEntry, error) {
+	out, err := c.RunCommand(instanceName, []string{
+		"/bin/sh", "-c",
+		fmt.Sprintf(`find %q -maxdepth 1 -mindepth 1 -printf '%%y %%s %%T@ %%f\n' 2>/dev/null | sort -t' ' -k4`, path),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list directory %s: %w", path, err)
+	}
+
+	var entries []FileEntry
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		// Format: "d 4096 1712345678.123 dirname" or "f 1234 1712345678.123 filename"
+		parts := strings.SplitN(line, " ", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		typ := "file"
+		if parts[0] == "d" {
+			typ = "folder"
+		}
+		size, _ := strconv.ParseInt(parts[1], 10, 64)
+		tsFloat, _ := strconv.ParseFloat(parts[2], 64)
+		date := int64(tsFloat)
+		name := parts[3]
+
+		entries = append(entries, FileEntry{
+			ID:   filepath.Join(path, name),
+			Name: name,
+			Type: typ,
+			Size: size,
+			Date: date,
+		})
+	}
+	return entries, nil
+}
+
+// GetFile downloads a single file from the instance using the Incus file API.
+func (c *Client) GetFile(instanceName, path string) (io.ReadCloser, *FileInfo, error) {
+	reader, resp, err := c.server.GetInstanceFile(instanceName, path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get file %s: %w", path, err)
+	}
+	info := &FileInfo{
+		UID:  resp.UID,
+		GID:  resp.GID,
+		Mode: resp.Mode,
+		Type: resp.Type,
+	}
+	return reader, info, nil
+}
+
+// StreamDirectory streams a directory as a tar archive.
+func (c *Client) StreamDirectory(instanceName, path string) (io.ReadCloser, error) {
+	parent := filepath.Dir(path)
+	base := filepath.Base(path)
+	return c.StreamCommand(instanceName, []string{"tar", "-C", parent, "-cf", "-", base})
+}
+
+// ListVolumeSnapshots returns all snapshots for a custom storage volume.
+func (c *Client) ListVolumeSnapshots(pool, volumeName string) ([]VolumeSnapshotInfo, error) {
+	snapshots, err := c.server.GetStoragePoolVolumeSnapshots(pool, "custom", volumeName)
+	if err != nil {
+		return nil, fmt.Errorf("list volume snapshots %s/%s: %w", pool, volumeName, err)
+	}
+	var result []VolumeSnapshotInfo
+	for _, s := range snapshots {
+		result = append(result, VolumeSnapshotInfo{
+			Name:      s.Name,
+			CreatedAt: s.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+// CreateVolumeSnapshot creates a named snapshot of a custom storage volume.
+func (c *Client) CreateVolumeSnapshot(pool, volumeName, snapshotName string) error {
+	req := incusapi.StorageVolumeSnapshotsPost{
+		Name: snapshotName,
+	}
+	op, err := c.server.CreateStoragePoolVolumeSnapshot(pool, "custom", volumeName, req)
+	if err != nil {
+		return fmt.Errorf("create volume snapshot %s/%s/%s: %w", pool, volumeName, snapshotName, err)
+	}
+	return op.Wait()
+}
+
+// DeleteVolumeSnapshot deletes a named snapshot of a custom storage volume.
+func (c *Client) DeleteVolumeSnapshot(pool, volumeName, snapshotName string) error {
+	op, err := c.server.DeleteStoragePoolVolumeSnapshot(pool, "custom", volumeName, snapshotName)
+	if err != nil {
+		return fmt.Errorf("delete volume snapshot %s/%s/%s: %w", pool, volumeName, snapshotName, err)
+	}
+	return op.Wait()
+}
+
+// RestoreVolumeSnapshot restores a custom storage volume to a named snapshot.
+func (c *Client) RestoreVolumeSnapshot(pool, volumeName, snapshotName string) error {
+	vol, etag, err := c.server.GetStoragePoolVolume(pool, "custom", volumeName)
+	if err != nil {
+		return fmt.Errorf("get volume for restore %s/%s: %w", pool, volumeName, err)
+	}
+	writable := vol.Writable()
+	writable.Restore = snapshotName
+	err = c.server.UpdateStoragePoolVolume(pool, "custom", volumeName, writable, etag)
+	if err != nil {
+		return fmt.Errorf("restore volume snapshot %s/%s/%s: %w", pool, volumeName, snapshotName, err)
+	}
+	return nil
 }

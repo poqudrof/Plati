@@ -166,3 +166,12 @@ See [docker-plan.md](docker-plan.md) for the Docker deployment plan (nginx + bac
 - [Architecture](doc/architecture.md)
 - [Technologies](doc/technologies.md)
 - [Future improvements](doc/future-improvements.md)
+
+
+## Tailscale service 
+
+tailscale serve  --service=svc:plati --https=443 127.0.0.1:5300
+(not required !) tailscale serve  --service=svc:plati-server 127.0.0.1:8
+−> Allow in admin 
+
+#To remove config for the service, run: tailscale serve clear svc:plati

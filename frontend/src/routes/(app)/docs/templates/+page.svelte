@@ -159,7 +159,7 @@ first_init_commands:
 
 <div class="max-w-3xl">
   <div class="mb-6">
-    <a href="/docs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Docs</a>
+    <a href="/docs" class="text-sm text-primary hover:text-primary-dark">&larr; Back to Docs</a>
   </div>
 
   <h1 class="text-2xl font-bold mb-2">Templates</h1>
@@ -208,7 +208,7 @@ first_init_commands:
     <div class="bg-white border rounded-lg overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b">
         <span class="text-sm font-medium text-gray-700">all-fields.yaml</span>
-        <button onclick={() => copyToClipboard(referenceTemplate, 'reference')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+        <button onclick={() => copyToClipboard(referenceTemplate, 'reference')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
           {copied === 'reference' ? 'Copied!' : 'Copy YAML'}
         </button>
       </div>
@@ -228,7 +228,7 @@ first_init_commands:
             <h3 class="font-medium text-sm">Minimum</h3>
             <p class="text-xs text-gray-500 mt-0.5">Only required fields — no provisioning</p>
           </div>
-          <button onclick={() => copyToClipboard(minimalExample, 'minimal')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+          <button onclick={() => copyToClipboard(minimalExample, 'minimal')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
             {copied === 'minimal' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
@@ -242,7 +242,7 @@ first_init_commands:
             <h3 class="font-medium text-sm">Without cloud-init</h3>
             <p class="text-xs text-gray-500 mt-0.5">Alpine Linux — uses <code class="bg-gray-100 px-1 rounded">post_create_commands</code> for setup</p>
           </div>
-          <button onclick={() => copyToClipboard(noCloudInitExample, 'noci')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+          <button onclick={() => copyToClipboard(noCloudInitExample, 'noci')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
             {copied === 'noci' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
@@ -256,7 +256,7 @@ first_init_commands:
             <h3 class="font-medium text-sm">With cloud-init</h3>
             <p class="text-xs text-gray-500 mt-0.5">Ubuntu <code class="bg-gray-100 px-1 rounded">/cloud</code> image — packages and commands on first boot</p>
           </div>
-          <button onclick={() => copyToClipboard(cloudInitExample, 'ci')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+          <button onclick={() => copyToClipboard(cloudInitExample, 'ci')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
             {copied === 'ci' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
@@ -270,7 +270,7 @@ first_init_commands:
             <h3 class="font-medium text-sm">With Docker</h3>
             <p class="text-xs text-gray-500 mt-0.5">Docker Engine via mixin + <code class="bg-gray-100 px-1 rounded">docker</code> profile</p>
           </div>
-          <button onclick={() => copyToClipboard(dockerExample, 'docker')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+          <button onclick={() => copyToClipboard(dockerExample, 'docker')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
             {copied === 'docker' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
@@ -284,7 +284,7 @@ first_init_commands:
             <h3 class="font-medium text-sm">With Nvidia GPU</h3>
             <p class="text-xs text-gray-500 mt-0.5">GPU passthrough — requires <code class="bg-gray-100 px-1 rounded">setup-gpu-profile.sh</code> on the host</p>
           </div>
-          <button onclick={() => copyToClipboard(gpuExample, 'gpu')} class="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100">
+          <button onclick={() => copyToClipboard(gpuExample, 'gpu')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
             {copied === 'gpu' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>

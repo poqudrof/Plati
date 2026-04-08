@@ -1,35 +1,50 @@
 package services
 
 import (
-	"encoding/base64"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/jmoiron/sqlx"
 	"gopkg.in/yaml.v3"
 
 	"github.com/homaserver/plati/internal/database/queries"
+	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
 )
 
+// MixinFileInfo describes a file pushed by a mixin.
+type MixinFileInfo struct {
+	Src  string `json:"src"`
+	Dest string `json:"dest"`
+	Mode string `json:"mode"`
+}
+
 // MixinInfo is returned by ListMixins so the frontend knows what mixins are available.
 type MixinInfo struct {
-	Name     string   `json:"name"`
-	Commands []string `json:"commands"`
+	Name     string          `json:"name"`
+	Commands []string        `json:"commands"`
+	Files    []MixinFileInfo `json:"files"`
 }
 
 type TemplateService struct {
-	db     *sqlx.DB
-	mixins map[string]MixinYAML
+	db           *sqlx.DB
+	mixins       map[string]MixinYAML
+	mu           sync.RWMutex
+	templatesDir string
 }
 
-func NewTemplateService(db *sqlx.DB) *TemplateService {
-	return &TemplateService{db: db, mixins: make(map[string]MixinYAML)}
+func NewTemplateService(db *sqlx.DB, templatesDir string) *TemplateService {
+	return &TemplateService{db: db, mixins: make(map[string]MixinYAML), templatesDir: templatesDir}
 }
 
 type MixinFile struct {
@@ -38,10 +53,18 @@ type MixinFile struct {
 	Mode string `yaml:"mode,omitempty"`
 }
 
+// resolvedMixinFile holds the absolute host path for a mixin file after LoadMixinsFromDir.
+type resolvedMixinFile struct {
+	SrcPath string // absolute path on host
+	Dest    string // destination path inside container
+	Mode    int    // unix file mode (e.g. 0755)
+}
+
 type MixinYAML struct {
-	Name               string      `yaml:"name"`
-	Files              []MixinFile `yaml:"files,omitempty"`
-	PostCreateCommands []string    `yaml:"post_create_commands,omitempty"`
+	Name               string              `yaml:"name"`
+	Files              []MixinFile         `yaml:"files,omitempty"`
+	PostCreateCommands []string            `yaml:"post_create_commands,omitempty"`
+	resolvedFiles      []resolvedMixinFile // populated at load time, not from YAML
 }
 
 type PersistenceDirYAML struct {
@@ -55,20 +78,41 @@ type PersistenceYAML struct {
 	Directories []PersistenceDirYAML `yaml:"directories"`
 }
 
+type RepoRefYAML struct {
+	Name string `yaml:"name"`
+	Dest string `yaml:"dest"`
+}
+
+type HealthCheckYAML struct {
+	Port           int    `yaml:"port" json:"port"`
+	Path           string `yaml:"path" json:"path"`
+	ExpectedStatus int    `yaml:"expected_status" json:"expected_status"`
+	Timeout        int    `yaml:"timeout" json:"timeout"` // seconds to wait
+	Description    string `yaml:"description" json:"description"`
+}
+
+type TailscaleServeYAML struct {
+	Port   int  `yaml:"port" json:"port"`
+	Funnel bool `yaml:"funnel" json:"funnel"`
+}
+
 type TemplateYAML struct {
-	Name               string           `yaml:"name"`
-	Slug               string           `yaml:"slug"`
-	Description        string           `yaml:"description"`
-	Image              string           `yaml:"image"`
-	Profiles           []string         `yaml:"profiles"`
-	Resources          map[string]any   `yaml:"resources"`
-	CloudInit          string           `yaml:"cloud_init"`
-	TerminalUser       string           `yaml:"terminal_user,omitempty"`
-	Includes           []string         `yaml:"includes,omitempty"`
-	PostCreateCommands []string         `yaml:"post_create_commands,omitempty"` // deprecated
-	FirstInitCommands  []string         `yaml:"first_init_commands,omitempty"`
-	RebuildCommands    []string         `yaml:"rebuild_commands,omitempty"`
-	Persistence        *PersistenceYAML `yaml:"persistence,omitempty"`
+	Name               string               `yaml:"name"`
+	Slug               string               `yaml:"slug"`
+	Description        string               `yaml:"description"`
+	Image              string               `yaml:"image"`
+	Profiles           []string             `yaml:"profiles"`
+	Resources          map[string]any       `yaml:"resources"`
+	CloudInit          string               `yaml:"cloud_init"`
+	TerminalUser       string               `yaml:"terminal_user,omitempty"`
+	Includes           []string             `yaml:"includes,omitempty"`
+	PostCreateCommands []string             `yaml:"post_create_commands,omitempty"` // deprecated
+	FirstInitCommands  []string             `yaml:"first_init_commands,omitempty"`
+	RebuildCommands    []string             `yaml:"rebuild_commands,omitempty"`
+	Persistence        *PersistenceYAML     `yaml:"persistence,omitempty"`
+	Repos              []RepoRefYAML        `yaml:"repos,omitempty"`
+	HealthChecks       []HealthCheckYAML    `yaml:"health_checks,omitempty"`
+	TailscaleServe     *TailscaleServeYAML  `yaml:"tailscale_serve,omitempty"`
 }
 
 func (s *TemplateService) List(activeOnly bool) ([]models.Template, error) {
@@ -93,6 +137,8 @@ func (s *TemplateService) Delete(id int64) error {
 
 // ListMixins returns all loaded mixins sorted by name.
 func (s *TemplateService) ListMixins() []MixinInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	names := make([]string, 0, len(s.mixins))
 	for name := range s.mixins {
 		names = append(names, name)
@@ -101,18 +147,72 @@ func (s *TemplateService) ListMixins() []MixinInfo {
 	result := make([]MixinInfo, 0, len(names))
 	for _, name := range names {
 		m := s.mixins[name]
-		result = append(result, MixinInfo{Name: name, Commands: m.PostCreateCommands})
+		result = append(result, MixinInfo{Name: name, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)})
 	}
 	return result
 }
 
 // GetMixin returns info for a single mixin by stem name.
 func (s *TemplateService) GetMixin(name string) (MixinInfo, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	m, ok := s.mixins[name]
 	if !ok {
 		return MixinInfo{}, false
 	}
-	return MixinInfo{Name: name, Commands: m.PostCreateCommands}, true
+	return MixinInfo{Name: name, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)}, true
+}
+
+func mixinFilesInfo(m MixinYAML) []MixinFileInfo {
+	files := make([]MixinFileInfo, len(m.Files))
+	for i, f := range m.Files {
+		mode := f.Mode
+		if mode == "" {
+			mode = "0644"
+		}
+		files[i] = MixinFileInfo{Src: f.Src, Dest: f.Dest, Mode: mode}
+	}
+	return files
+}
+
+// SaveToDisk writes the template YAML to the templates directory on disk.
+func (s *TemplateService) SaveToDisk(id int64) error {
+	if s.templatesDir == "" {
+		return fmt.Errorf("templates directory not configured")
+	}
+	t, err := queries.GetTemplate(s.db, id)
+	if err != nil {
+		return fmt.Errorf("get template: %w", err)
+	}
+	yamlBytes, err := s.ExportYAML(id)
+	if err != nil {
+		return fmt.Errorf("export yaml: %w", err)
+	}
+	return os.WriteFile(filepath.Join(s.templatesDir, t.Slug+".yaml"), yamlBytes, 0644)
+}
+
+// GetMixinFileSteps returns PushFile setup steps for all files declared in the given mixin names.
+// These steps transfer large binaries (tarballs, executables) into the instance using the
+// Incus file API — no shell embedding, no bind-mounts.
+func (s *TemplateService) GetMixinFileSteps(names []string) []incus.SetupStep {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var steps []incus.SetupStep
+	for _, name := range names {
+		m, ok := s.mixins[name]
+		if !ok {
+			continue
+		}
+		for _, rf := range m.resolvedFiles {
+			steps = append(steps, incus.SetupStep{
+				Label:          fmt.Sprintf("Push %s → %s", filepath.Base(rf.SrcPath), rf.Dest),
+				FileDest:       rf.Dest,
+				FileSourcePath: rf.SrcPath,
+				FileMode:       rf.Mode,
+			})
+		}
+	}
+	return steps
 }
 
 // DuplicateTemplate clones template id with a new name and slug.
@@ -148,6 +248,7 @@ func (s *TemplateService) UpdateFromYAML(id int64, data []byte) (*models.Templat
 
 func (s *TemplateService) LoadMixinsFromDir(dir string) error {
 	files, _ := filepath.Glob(filepath.Join(dir, "mixins", "*.yaml"))
+	newMixins := make(map[string]MixinYAML)
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -159,29 +260,34 @@ func (s *TemplateService) LoadMixinsFromDir(dir string) error {
 			log.Printf("warning: parse mixin %s: %v", f, err)
 			continue
 		}
-		// Expand file entries into base64-write commands, prepended before post_create_commands.
-		if len(m.Files) > 0 {
-			var fileCmds []string
-			for _, mf := range m.Files {
-				filePath := filepath.Join(dir, "mixins", mf.Src)
-				content, err := os.ReadFile(filePath)
-				if err != nil {
-					log.Printf("warning: mixin file %s: %v", filePath, err)
-					continue
-				}
-				encoded := base64.StdEncoding.EncodeToString(content)
-				fileCmds = append(fileCmds, fmt.Sprintf("printf '%%s' '%s' | base64 -d > %s", encoded, mf.Dest))
-				if mf.Mode != "" {
-					fileCmds = append(fileCmds, fmt.Sprintf("chmod %s %s", mf.Mode, mf.Dest))
+		// Resolve file entries to absolute host paths.
+		// Files are pushed into the instance via PushFile at creation time.
+		for _, mf := range m.Files {
+			srcPath := filepath.Join(dir, "mixins", mf.Src)
+			if _, err := os.Stat(srcPath); err != nil {
+				log.Printf("warning: mixin file %s not found: %v", srcPath, err)
+				continue
+			}
+			mode := 0644
+			if mf.Mode != "" {
+				if parsed, err := strconv.ParseInt(mf.Mode, 8, 32); err == nil {
+					mode = int(parsed)
 				}
 			}
-			m.PostCreateCommands = append(fileCmds, m.PostCreateCommands...)
+			m.resolvedFiles = append(m.resolvedFiles, resolvedMixinFile{
+				SrcPath: srcPath,
+				Dest:    mf.Dest,
+				Mode:    mode,
+			})
 		}
 
 		stem := strings.TrimSuffix(filepath.Base(f), ".yaml")
-		s.mixins[stem] = m
+		newMixins[stem] = m
 		log.Printf("loaded mixin: %s (%d commands)", stem, len(m.PostCreateCommands))
 	}
+	s.mu.Lock()
+	s.mixins = newMixins
+	s.mu.Unlock()
 	return nil
 }
 
@@ -191,9 +297,13 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		return nil, fmt.Errorf("invalid YAML: %w", err)
 	}
 
+	s.mu.RLock()
+	mixins := s.mixins
+	s.mu.RUnlock()
+
 	var resolvedCmds []string
 	for _, name := range ty.Includes {
-		m, ok := s.mixins[name]
+		m, ok := mixins[name]
 		if !ok {
 			log.Printf("warning: mixin %q not found, skipping", name)
 			continue
@@ -252,6 +362,31 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		includesJSON = []byte("[]")
 	}
 
+	reposJSON, _ := json.Marshal(ty.Repos)
+	if string(reposJSON) == "null" {
+		reposJSON = []byte("[]")
+	}
+
+	healthChecksJSON, _ := json.Marshal(ty.HealthChecks)
+	if string(healthChecksJSON) == "null" {
+		healthChecksJSON = []byte("[]")
+	}
+
+	tailscaleServeJSON := ""
+	if ty.TailscaleServe != nil && ty.TailscaleServe.Port > 0 {
+		tsj, _ := json.Marshal(ty.TailscaleServe)
+		tailscaleServeJSON = string(tsj)
+
+		// Generate tailscale serve commands appended to first_init_commands.
+		waitCmd := `for i in $(seq 1 30); do tailscale status >/dev/null 2>&1 && break; sleep 2; done`
+		serveCmd := fmt.Sprintf("tailscale serve --bg https+insecure://localhost:%d", ty.TailscaleServe.Port)
+		if ty.TailscaleServe.Funnel {
+			serveCmd = fmt.Sprintf("tailscale funnel --bg https+insecure://localhost:%d", ty.TailscaleServe.Port)
+		}
+		firstInitCmds = append(firstInitCmds, waitCmd, serveCmd)
+		firstInitJSON, _ = json.Marshal(firstInitCmds)
+	}
+
 	return &models.Template{
 		Name:               ty.Name,
 		Slug:               ty.Slug,
@@ -267,6 +402,9 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		FirstInitCommands:  string(firstInitJSON),
 		RebuildCommands:    string(rebuildJSON),
 		Includes:           string(includesJSON),
+		Repos:              string(reposJSON),
+		HealthChecks:       string(healthChecksJSON),
+		TailscaleServe:     tailscaleServeJSON,
 		IsActive:           true,
 	}, nil
 }
@@ -304,6 +442,14 @@ func (s *TemplateService) ExportYAML(id int64) ([]byte, error) {
 	json.Unmarshal([]byte(t.PersistenceDirs), &persistenceDirs)
 	var includes []string
 	json.Unmarshal([]byte(t.Includes), &includes)
+	var repos []RepoRefYAML
+	json.Unmarshal([]byte(t.Repos), &repos)
+	var healthChecks []HealthCheckYAML
+	json.Unmarshal([]byte(t.HealthChecks), &healthChecks)
+	var tailscaleServe *TailscaleServeYAML
+	if t.TailscaleServe != "" {
+		json.Unmarshal([]byte(t.TailscaleServe), &tailscaleServe)
+	}
 
 	ty := TemplateYAML{
 		Name:              t.Name,
@@ -317,6 +463,9 @@ func (s *TemplateService) ExportYAML(id int64) ([]byte, error) {
 		Includes:          includes,
 		FirstInitCommands: firstInitCmds,
 		RebuildCommands:   rebuildCmds,
+		Repos:             repos,
+		HealthChecks:      healthChecks,
+		TailscaleServe:    tailscaleServe,
 		Persistence: &PersistenceYAML{
 			Mode:        t.PersistenceMode,
 			Directories: persistenceDirs,
@@ -385,6 +534,64 @@ func (s *TemplateService) SyncFromDir(dir string) error {
 			}
 		}
 	}
+
+	return nil
+}
+
+// WatchDir watches dir for YAML changes and re-runs SyncFromDir on any write event.
+// It debounces rapid successive changes with a 500ms delay.
+// The goroutine exits when ctx is cancelled.
+func (s *TemplateService) WatchDir(ctx context.Context, dir string) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("create watcher: %w", err)
+	}
+
+	for _, d := range []string{dir, filepath.Join(dir, "mixins")} {
+		if _, err := os.Stat(d); err == nil {
+			if err := watcher.Add(d); err != nil {
+				log.Printf("warning: watch %s: %v", d, err)
+			}
+		}
+	}
+
+	go func() {
+		defer watcher.Close()
+		var debounce *time.Timer
+		for {
+			select {
+			case <-ctx.Done():
+				if debounce != nil {
+					debounce.Stop()
+				}
+				return
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if !strings.HasSuffix(event.Name, ".yaml") {
+					continue
+				}
+				if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0 {
+					continue
+				}
+				if debounce != nil {
+					debounce.Stop()
+				}
+				debounce = time.AfterFunc(500*time.Millisecond, func() {
+					log.Printf("templates changed (%s), reloading...", filepath.Base(event.Name))
+					if err := s.SyncFromDir(dir); err != nil {
+						log.Printf("warning: reload templates: %v", err)
+					}
+				})
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Printf("warning: template watcher: %v", err)
+			}
+		}
+	}()
 
 	return nil
 }

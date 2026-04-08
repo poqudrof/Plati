@@ -1,7 +1,15 @@
 name: Tailscale mixin
+files:
+  - src: dist/tailscale-install.sh
+    dest: /root/tailscale-install.sh
+    mode: "0755"
+# online alternative (requires curl):
+#post_create_commands:
+#  - apt-get install -y -q curl iptables
+#  - curl -fsSL https://tailscale.com/install.sh | sh
 post_create_commands:
-  - apt-get install -y -q curl iptables
-  - curl -fsSL https://tailscale.com/install.sh | sh
+  - apt-get install -y -q iptables
+  - sh /root/tailscale-install.sh
   - systemctl enable tailscaled
   - systemctl start tailscaled
   - '. /etc/profile.d/plati-env.sh && [ -n "$TAILSCALE_AUTH_KEY" ] && tailscale up --auth-key="$TAILSCALE_AUTH_KEY" --hostname="${PLATI_TAILSCALE_HOSTNAME:-$(hostname)}" || true'

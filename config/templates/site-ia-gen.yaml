@@ -1,0 +1,21 @@
+name: Site IA Gen
+slug: site-ia-gen
+description: AI State of the Art public site (catie-aq)
+image: images:ubuntu/24.04/cloud
+profiles:
+  - default
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+persistence:
+  mode: normal
+  directories:
+    - path: /workspace
+      size: 20GB
+terminal_user: ubuntu
+repos:
+  - name: AI-state-art-public
+    dest: /workspace/AI-state-art-public
+rebuild_commands:
+  - cd /workspace/AI-state-art-public && git pull --ff-only || true

@@ -3,7 +3,7 @@
 
 <div class="max-w-3xl">
   <div class="mb-6">
-    <a href="/docs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Docs</a>
+    <a href="/docs" class="text-sm text-primary hover:text-primary-dark">&larr; Back to Docs</a>
   </div>
 
   <h1 class="text-2xl font-bold mb-2">Settings</h1>
@@ -12,7 +12,7 @@
   <section class="mb-10">
     <h2 class="text-xl font-semibold mb-4">SSH Keys</h2>
     <div class="bg-white border rounded-lg p-4 space-y-3 text-sm text-gray-600">
-      <p>SSH keys let you connect to your instances via SSH. Add your public key in <a href="/settings" class="text-indigo-600 underline">Settings</a>.</p>
+      <p>SSH keys let you connect to your instances via SSH. Add your public key in <a href="/settings" class="text-primary underline">Settings</a>.</p>
       <h3 class="font-medium text-gray-700 mt-2">Generating a key</h3>
       <pre class="bg-gray-50 rounded p-3 text-xs font-mono">ssh-keygen -t ed25519 -C "your-email@example.com"
 cat ~/.ssh/id_ed25519.pub</pre>

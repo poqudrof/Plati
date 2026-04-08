@@ -1,10 +1,8 @@
 package services
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -16,7 +14,9 @@ func TestLoadMixins_FilesExpanded(t *testing.T) {
 	}
 
 	// Write the asset file that the mixin references.
-	if err := os.WriteFile(filepath.Join(mixinsDir, "myfile.txt"), []byte("hello\n"), 0644); err != nil {
+	assetContent := []byte("hello\n")
+	assetPath := filepath.Join(mixinsDir, "myfile.txt")
+	if err := os.WriteFile(assetPath, assetContent, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -43,41 +43,28 @@ post_create_commands:
 		t.Fatal("mixin 'test' not loaded")
 	}
 
-	// Expect: write cmd + chmod cmd + echo done = 3 commands.
-	if len(m.PostCreateCommands) != 3 {
-		t.Fatalf("expected 3 PostCreateCommands, got %d: %v", len(m.PostCreateCommands), m.PostCreateCommands)
+	// PostCreateCommands must only contain the original command — no cp/chmod injected.
+	if len(m.PostCreateCommands) != 1 {
+		t.Fatalf("expected 1 PostCreateCommand, got %d: %v", len(m.PostCreateCommands), m.PostCreateCommands)
+	}
+	if m.PostCreateCommands[0] != "echo done" {
+		t.Errorf("command[0] = %q, want %q", m.PostCreateCommands[0], "echo done")
 	}
 
-	// Assert command[0] is the base64 write command for the correct dest.
-	writeCmd := m.PostCreateCommands[0]
-	if !strings.Contains(writeCmd, "base64 -d > /etc/test/myfile.txt") {
-		t.Errorf("write command missing expected dest: %q", writeCmd)
+	// GetMixinFileSteps must return a PushFile step for the declared file.
+	steps := s.GetMixinFileSteps([]string{"test"})
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 mixin file step, got %d", len(steps))
 	}
-
-	// Decode the base64 payload and verify file content.
-	// Command format: printf '%s' '<B64>' | base64 -d > <dest>
-	start := strings.Index(writeCmd, "printf '%s' '") + len("printf '%s' '")
-	end := strings.Index(writeCmd[start:], "'")
-	if end <= 0 {
-		t.Fatalf("could not extract base64 payload from: %q", writeCmd)
+	step := steps[0]
+	if step.FileSourcePath != assetPath {
+		t.Errorf("FileSourcePath = %q, want %q", step.FileSourcePath, assetPath)
 	}
-	b64 := writeCmd[start : start+end]
-	decoded, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		t.Fatalf("base64 decode failed: %v", err)
+	if step.FileDest != "/etc/test/myfile.txt" {
+		t.Errorf("FileDest = %q, want %q", step.FileDest, "/etc/test/myfile.txt")
 	}
-	if string(decoded) != "hello\n" {
-		t.Errorf("decoded content = %q, want %q", decoded, "hello\n")
-	}
-
-	// Assert command[1] is the chmod command.
-	if m.PostCreateCommands[1] != "chmod 0644 /etc/test/myfile.txt" {
-		t.Errorf("command[1] = %q, want %q", m.PostCreateCommands[1], "chmod 0644 /etc/test/myfile.txt")
-	}
-
-	// Assert command[2] is the original post_create_command.
-	if m.PostCreateCommands[2] != "echo done" {
-		t.Errorf("command[2] = %q, want %q", m.PostCreateCommands[2], "echo done")
+	if step.FileMode != 0644 {
+		t.Errorf("FileMode = %o, want 0644", step.FileMode)
 	}
 }
 

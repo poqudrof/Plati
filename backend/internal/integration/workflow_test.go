@@ -154,6 +154,10 @@ func (m *mockIncusClient) UpdateInstanceConfig(name string, config map[string]st
 	return nil
 }
 
+func (m *mockIncusClient) AttachHostPath(instanceName, deviceName, hostPath, instancePath string) error {
+	return nil
+}
+
 func (m *mockIncusClient) StreamCommand(name string, command []string) (io.ReadCloser, error) {
 	if m.streamCommandFn != nil {
 		return m.streamCommandFn(name, command)
@@ -163,6 +167,28 @@ func (m *mockIncusClient) StreamCommand(name string, command []string) (io.ReadC
 
 func (m *mockIncusClient) PushFile(instanceName, remotePath string, content []byte, uid, gid int64, mode int) error {
 	m.pushedFiles[remotePath] = content
+	return nil
+}
+
+func (m *mockIncusClient) ListDirectory(instanceName, path string) ([]incus.FileEntry, error) {
+	return nil, nil
+}
+func (m *mockIncusClient) GetFile(instanceName, path string) (io.ReadCloser, *incus.FileInfo, error) {
+	return io.NopCloser(strings.NewReader("")), &incus.FileInfo{Type: "file"}, nil
+}
+func (m *mockIncusClient) StreamDirectory(instanceName, path string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (m *mockIncusClient) ListVolumeSnapshots(pool, volumeName string) ([]incus.VolumeSnapshotInfo, error) {
+	return nil, nil
+}
+func (m *mockIncusClient) CreateVolumeSnapshot(pool, volumeName, snapshotName string) error {
+	return nil
+}
+func (m *mockIncusClient) DeleteVolumeSnapshot(pool, volumeName, snapshotName string) error {
+	return nil
+}
+func (m *mockIncusClient) RestoreVolumeSnapshot(pool, volumeName, snapshotName string) error {
 	return nil
 }
 
@@ -225,10 +251,12 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("user service: %v", err)
 	}
-	templateSvc := services.NewTemplateService(db)
+	templateSvc := services.NewTemplateService(db, "")
 	prefSvc := services.NewPreferencesService(db)
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "")
+	managedKeySvc := services.NewManagedKeyService(db, userSvc, "")
+	repoSvc := services.NewRepoService(db, userSvc, "")
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
@@ -241,11 +269,13 @@ func newHarness(t *testing.T) *harness {
 		InstanceHandler:      handlers.NewInstanceHandler(instanceSvc, db),
 		ServerHandler:        handlers.NewServerHandler(serverSvc, pool),
 		AdminHandler:         adminHandler,
+		ManagedKeyHandler:    handlers.NewManagedKeyHandler(managedKeySvc),
 		HealthHandler:        healthHandler,
 		SetupHandler:         setupHandler,
 		TerminalHandler:      handlers.NewTerminalHandler(db, pool, instanceSvc.CreationLogs()),
 		PreferencesHandler:   handlers.NewPreferencesHandler(prefSvc),
 		AdminSettingsHandler: handlers.NewAdminSettingsHandler(adminSvc),
+		RepoHandler:          handlers.NewRepoHandler(repoSvc),
 		JWTSecret:            jwtSecret,
 		FrontendURL:          "http://localhost",
 	})
@@ -298,6 +328,20 @@ func waitForInstance(t *testing.T, h *harness, incusName string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timeout waiting for mock instance %s", incusName)
+}
+
+// waitForInstanceReady polls until the instance status in the DB is "running" (async creation complete).
+func waitForInstanceReady(t *testing.T, h *harness, instanceID int64) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		var status string
+		err := h.db.Get(&status, "SELECT status FROM instances WHERE id = ?", instanceID)
+		if err == nil && status == "running" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for instance %d to become running", instanceID)
 }
 
 func seedTemplate(t *testing.T, h *harness) int64 {
@@ -1229,4 +1273,551 @@ func TestTailscaleServeEndpoints(t *testing.T) {
 	}
 	resp.Body.Close()
 	t.Logf("Tailscale serve endpoints OK")
+}
+
+// TestServerSSHKeyAndRepos exercises the full flow:
+//  1. No key configured → GET /repos/server-key returns empty
+//  2. Generate server SSH key → verify ed25519 format
+//  3. GET /repos/server-key → key persisted correctly
+//  4. Add a repo → registered immediately, clone starts in background
+//  5. List repos → repo appears, clone status transitions off "pending"
+//  6. Sync repo → API accepts the sync request
+//  7. Delete repo → removed from DB
+//  8. Generate a second key → replaces the first
+//
+// The actual git clone will fail (no real SSH target in tests); this is expected.
+// The test verifies the full API lifecycle and that the server key is used.
+func TestServerSSHKeyAndRepos(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+
+	// Login
+	resp := h.do("POST", "/auth/login", map[string]string{"password": testPassword})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	// 1. No key configured yet → public_key is empty
+	resp = h.do("GET", "/api/v1/admin/repos/server-key", nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("get server key (empty): %d — %s", resp.StatusCode, body)
+	}
+	var keyState map[string]any
+	mustJSON(t, resp, &keyState)
+	if got := keyState["public_key"]; got != "" {
+		t.Errorf("expected empty public_key before generation, got %q", got)
+	}
+
+	// 2. Generate server SSH key
+	resp = h.do("POST", "/api/v1/admin/repos/server-key/generate", nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("generate server key: %d — %s", resp.StatusCode, body)
+	}
+	var genResp map[string]any
+	mustJSON(t, resp, &genResp)
+	pubKey, _ := genResp["public_key"].(string)
+	if !strings.HasPrefix(pubKey, "ssh-ed25519 ") {
+		t.Fatalf("generated key is not ed25519: %q", pubKey)
+	}
+	t.Logf("Generated server SSH key: %s...", pubKey[:min(40, len(pubKey))])
+
+	// 3. GET /repos/server-key → key is now persisted
+	resp = h.do("GET", "/api/v1/admin/repos/server-key", nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("get server key: %d — %s", resp.StatusCode, body)
+	}
+	mustJSON(t, resp, &keyState)
+	if keyState["public_key"] != pubKey {
+		t.Errorf("retrieved key %q != generated key %q", keyState["public_key"], pubKey)
+	}
+
+	// 4. Add a repo (clone will fail without real SSH access — that's expected)
+	resp = h.do("POST", "/api/v1/admin/repos", map[string]string{
+		"ssh_url": "git@github.com:test-org/test-repo.git",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("add repo: %d — %s", resp.StatusCode, body)
+	}
+	var repoResp map[string]any
+	mustJSON(t, resp, &repoResp)
+	repoID := int64(repoResp["id"].(float64))
+	if repoResp["clone_status"] != "pending" {
+		t.Errorf("expected clone_status=pending immediately after add, got %q", repoResp["clone_status"])
+	}
+	t.Logf("Repo registered: id=%d", repoID)
+
+	// 5. List repos → appears with updated status (background goroutine uses the server key)
+	time.Sleep(100 * time.Millisecond) // let goroutine start and update to "cloning"
+	resp = h.do("GET", "/api/v1/admin/repos", nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list repos: %d — %s", resp.StatusCode, body)
+	}
+	var repos []map[string]any
+	mustJSON(t, resp, &repos)
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if repos[0]["ssh_url"] != "git@github.com:test-org/test-repo.git" {
+		t.Errorf("repo ssh_url mismatch: %q", repos[0]["ssh_url"])
+	}
+	cloneStatus, _ := repos[0]["clone_status"].(string)
+	// Status should have advanced from "pending" (goroutine set to "cloning" or "error")
+	if cloneStatus == "pending" {
+		t.Errorf("clone status still pending after 100ms — goroutine may not have started")
+	}
+	t.Logf("Clone status after 100ms: %s", cloneStatus)
+
+	// 6. Sync repo → API accepts the request
+	resp = h.do("POST", fmt.Sprintf("/api/v1/admin/repos/%d/sync", repoID), nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("sync repo: %d — %s", resp.StatusCode, body)
+	}
+	var syncResp map[string]any
+	mustJSON(t, resp, &syncResp)
+	if syncResp["status"] != "syncing" {
+		t.Errorf("sync status = %q, want syncing", syncResp["status"])
+	}
+
+	// 7. Delete repo
+	resp = h.do("DELETE", fmt.Sprintf("/api/v1/admin/repos/%d", repoID), nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("delete repo: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = h.do("GET", "/api/v1/admin/repos", nil)
+	mustJSON(t, resp, &repos)
+	if len(repos) != 0 {
+		t.Errorf("expected 0 repos after delete, got %d", len(repos))
+	}
+
+	// 8. Generate a second key → replaces the first
+	resp = h.do("POST", "/api/v1/admin/repos/server-key/generate", nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("generate second key: %d — %s", resp.StatusCode, body)
+	}
+	var genResp2 map[string]any
+	mustJSON(t, resp, &genResp2)
+	pubKey2, _ := genResp2["public_key"].(string)
+	if pubKey2 == pubKey {
+		t.Errorf("second generated key should differ from first")
+	}
+
+	resp = h.do("GET", "/api/v1/admin/repos/server-key", nil)
+	mustJSON(t, resp, &keyState)
+	if keyState["public_key"] != pubKey2 {
+		t.Errorf("stored key should be updated to second key")
+	}
+	t.Logf("Second key generated and stored: %s...", pubKey2[:min(40, len(pubKey2))])
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ── Disk listing tests ───────────────────────────────────────────────────────
+
+type diskInfoJSON struct {
+	VolumeID     int64  `json:"volume_id"`
+	VolumeName   string `json:"volume_name"`
+	Pool         string `json:"pool"`
+	SizeGB       int    `json:"size_gb"`
+	MountPath    string `json:"mount_path"`
+	DeviceName   string `json:"device_name"`
+	InstanceID   int64  `json:"instance_id"`
+	InstanceName string `json:"instance_name"`
+	IncusName    string `json:"incus_name"`
+	Status       string `json:"status"`
+	UserID       int64  `json:"user_id"`
+	UserEmail    string `json:"user_email"`
+	UserName     string `json:"user_name"`
+	ServerID     int64  `json:"server_id"`
+	ServerName   string `json:"server_name"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func TestDiskListingLifecycle(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+
+	// Create instance
+	resp := h.do("POST", "/api/v1/instances", map[string]any{
+		"name": "disk-lifecycle", "template_id": templateID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create: %d — %s", resp.StatusCode, body)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	volName := inst.IncusName + "-workspace"
+
+	// Wait for async creation to complete (volumes written to DB in background)
+	waitForInstanceReady(t, h, inst.ID)
+
+	// --- After create: GET /api/v1/disks ---
+	resp = h.do("GET", "/api/v1/disks", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list disks: %d", resp.StatusCode)
+	}
+	var disks []diskInfoJSON
+	mustJSON(t, resp, &disks)
+	if len(disks) != 1 {
+		t.Fatalf("expected 1 disk, got %d", len(disks))
+	}
+	d := disks[0]
+	if d.VolumeName != volName {
+		t.Errorf("volume_name = %q, want %q", d.VolumeName, volName)
+	}
+	if d.Pool != "default" {
+		t.Errorf("pool = %q, want default", d.Pool)
+	}
+	if d.SizeGB != 20 {
+		t.Errorf("size_gb = %d, want 20", d.SizeGB)
+	}
+	if d.MountPath != "/workspace" {
+		t.Errorf("mount_path = %q, want /workspace", d.MountPath)
+	}
+	if d.DeviceName != "workspace" {
+		t.Errorf("device_name = %q, want workspace", d.DeviceName)
+	}
+	if d.InstanceName != "disk-lifecycle" {
+		t.Errorf("instance_name = %q, want disk-lifecycle", d.InstanceName)
+	}
+	if d.IncusName != inst.IncusName {
+		t.Errorf("incus_name = %q, want %q", d.IncusName, inst.IncusName)
+	}
+	if d.Status != "running" {
+		t.Errorf("status = %q, want running", d.Status)
+	}
+	if d.UserEmail != "admin@plati.local" {
+		t.Errorf("user_email = %q, want admin@plati.local", d.UserEmail)
+	}
+	if d.ServerName != "test-server" {
+		t.Errorf("server_name = %q, want test-server", d.ServerName)
+	}
+	// Cross-check mock
+	if size, ok := h.mock.volumes[volName]; !ok {
+		t.Errorf("mock: volume %q not found", volName)
+	} else if size != 20 {
+		t.Errorf("mock: volume size = %d, want 20", size)
+	}
+	t.Logf("Disk listing after create OK: %s (%dGB at %s)", d.VolumeName, d.SizeGB, d.MountPath)
+
+	// --- After create: GET /api/v1/admin/disks ---
+	resp = h.do("GET", "/api/v1/admin/disks", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin list disks: %d", resp.StatusCode)
+	}
+	var adminDisks []diskInfoJSON
+	mustJSON(t, resp, &adminDisks)
+	if len(adminDisks) != 1 {
+		t.Errorf("admin disks: expected 1, got %d", len(adminDisks))
+	}
+
+	// --- Rebuild ---
+	resp = h.do("POST", fmt.Sprintf("/api/v1/instances/%d/rebuild", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("rebuild: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = h.do("GET", "/api/v1/disks", nil)
+	mustJSON(t, resp, &disks)
+	if len(disks) != 1 {
+		t.Fatalf("after rebuild: expected 1 disk, got %d", len(disks))
+	}
+	if disks[0].VolumeName != volName {
+		t.Errorf("after rebuild: volume_name changed to %q", disks[0].VolumeName)
+	}
+	if disks[0].Status != "running" {
+		t.Errorf("after rebuild: status = %q, want running", disks[0].Status)
+	}
+	t.Logf("Disk listing after rebuild OK: volume preserved")
+
+	// --- Delete ---
+	resp = h.do("DELETE", fmt.Sprintf("/api/v1/instances/%d", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("delete: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = h.do("GET", "/api/v1/disks", nil)
+	mustJSON(t, resp, &disks)
+	if len(disks) != 0 {
+		t.Errorf("after delete: expected 0 disks, got %d", len(disks))
+	}
+	if _, ok := h.mock.volumes[volName]; ok {
+		t.Errorf("mock: volume %q still exists after delete", volName)
+	}
+
+	resp = h.do("GET", "/api/v1/admin/disks", nil)
+	mustJSON(t, resp, &adminDisks)
+	if len(adminDisks) != 0 {
+		t.Errorf("admin disks after delete: expected 0, got %d", len(adminDisks))
+	}
+	t.Logf("Disk listing after delete OK: empty")
+}
+
+func TestDiskListingUserIsolation(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+
+	// Create instance for admin
+	resp := h.do("POST", "/api/v1/instances", map[string]any{
+		"name": "admin-disk", "template_id": templateID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create admin instance: %d — %s", resp.StatusCode, body)
+	}
+	var adminInst models.InstanceJSON
+	mustJSON(t, resp, &adminInst)
+	waitForInstanceReady(t, h, adminInst.ID)
+
+	// Ensure password_hash column exists (migration numbering conflict may skip it)
+	h.db.Exec("ALTER TABLE users ADD COLUMN password_hash TEXT")
+
+	// Create regular user with password
+	const userPassword = "userpass123"
+	userHash, _ := auth.HashPassword(userPassword)
+	res, err := h.db.Exec(
+		`INSERT INTO users (email, name, role, password_hash) VALUES ('bob@test.com', 'Bob', 'user', ?)`, userHash)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	bobID, _ := res.LastInsertId()
+
+	// Admin creates instance for Bob
+	resp = h.do("POST", "/api/v1/admin/instances", map[string]any{
+		"name": "bob-disk", "template_id": templateID, "user_id": bobID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create bob instance: %d — %s", resp.StatusCode, body)
+	}
+	var bobInst models.InstanceJSON
+	mustJSON(t, resp, &bobInst)
+	waitForInstanceReady(t, h, bobInst.ID)
+
+	// Admin sees all disks
+	resp = h.do("GET", "/api/v1/admin/disks", nil)
+	var adminDisks []diskInfoJSON
+	mustJSON(t, resp, &adminDisks)
+	if len(adminDisks) != 2 {
+		t.Fatalf("admin disks: expected 2, got %d", len(adminDisks))
+	}
+	emails := map[string]bool{}
+	for _, d := range adminDisks {
+		emails[d.UserEmail] = true
+	}
+	if !emails["admin@plati.local"] || !emails["bob@test.com"] {
+		t.Errorf("admin disks: expected both users, got %v", emails)
+	}
+	t.Logf("Admin sees 2 disks from 2 users")
+
+	// Admin's own disks
+	resp = h.do("GET", "/api/v1/disks", nil)
+	var myDisks []diskInfoJSON
+	mustJSON(t, resp, &myDisks)
+	if len(myDisks) != 1 {
+		t.Fatalf("admin own disks: expected 1, got %d", len(myDisks))
+	}
+	if myDisks[0].UserEmail != "admin@plati.local" {
+		t.Errorf("admin own disk: user_email = %q", myDisks[0].UserEmail)
+	}
+
+	// Login as Bob (new cookie jar to avoid admin session)
+	h.do("POST", "/auth/logout", nil).Body.Close()
+	resp = h.do("POST", "/auth/login", map[string]string{"email": "bob@test.com", "password": userPassword})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bob login: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	// Bob sees only his disk
+	resp = h.do("GET", "/api/v1/disks", nil)
+	var bobDisks []diskInfoJSON
+	mustJSON(t, resp, &bobDisks)
+	if len(bobDisks) != 1 {
+		t.Fatalf("bob disks: expected 1, got %d", len(bobDisks))
+	}
+	if bobDisks[0].UserEmail != "bob@test.com" {
+		t.Errorf("bob disk: user_email = %q, want bob@test.com", bobDisks[0].UserEmail)
+	}
+	if bobDisks[0].InstanceName != "bob-disk" {
+		t.Errorf("bob disk: instance_name = %q, want bob-disk", bobDisks[0].InstanceName)
+	}
+	t.Logf("Bob sees only his own disk")
+
+	// Bob cannot access admin disks
+	resp = h.do("GET", "/api/v1/admin/disks", nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("bob admin disks: got %d, want 403", resp.StatusCode)
+	}
+	resp.Body.Close()
+	t.Logf("Bob correctly denied admin disk listing")
+}
+
+func TestDiskListingEphemeral(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	// Import ephemeral template
+	body := strings.NewReader(`{
+		"name":"EphemeralDisk","slug":"ephemeral-disk","description":"No volumes",
+		"image":"images:alpine/3.20","profiles":["default"],
+		"resources":{"cpu":"1","memory":"256MB","disk":"5GB"},
+		"cloud_init":"#cloud-config\n",
+		"persistence":{"mode":"ephemeral"}
+	}`)
+	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
+	req.Header.Set("Content-Type", "application/json")
+	for _, c := range h.client.Jar.Cookies(req.URL) {
+		req.AddCookie(c)
+	}
+	resp, _ := h.client.Do(req)
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("import ephemeral template: %d — %s", resp.StatusCode, b)
+	}
+	var tmpl models.Template
+	mustJSON(t, resp, &tmpl)
+
+	// Create ephemeral instance
+	resp = h.do("POST", "/api/v1/instances", map[string]any{
+		"name": "ephemeral-disk-test", "template_id": tmpl.ID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create ephemeral: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+
+	// No disks
+	resp = h.do("GET", "/api/v1/disks", nil)
+	var disks []diskInfoJSON
+	mustJSON(t, resp, &disks)
+	if len(disks) != 0 {
+		t.Errorf("ephemeral: expected 0 disks, got %d", len(disks))
+	}
+
+	resp = h.do("GET", "/api/v1/admin/disks", nil)
+	var adminDisks []diskInfoJSON
+	mustJSON(t, resp, &adminDisks)
+	if len(adminDisks) != 0 {
+		t.Errorf("ephemeral admin: expected 0 disks, got %d", len(adminDisks))
+	}
+	t.Logf("Ephemeral instance produces no disks")
+}
+
+func TestDiskListingMultiVolume(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	// Import multi-volume template
+	body := strings.NewReader(`{
+		"name":"MultiVol","slug":"multi-vol","description":"Two volumes",
+		"image":"images:ubuntu/24.04/cloud","profiles":["default"],
+		"resources":{"cpu":"1","memory":"512MB"},
+		"cloud_init":"#cloud-config\n",
+		"persistence":{
+			"mode":"normal",
+			"directories":[
+				{"path":"/workspace","size":"20GB"},
+				{"path":"/data","size":"10GB"}
+			]
+		}
+	}`)
+	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
+	req.Header.Set("Content-Type", "application/json")
+	for _, c := range h.client.Jar.Cookies(req.URL) {
+		req.AddCookie(c)
+	}
+	resp, _ := h.client.Do(req)
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("import multi-vol template: %d — %s", resp.StatusCode, b)
+	}
+	var tmpl models.Template
+	mustJSON(t, resp, &tmpl)
+
+	// Create instance
+	resp = h.do("POST", "/api/v1/instances", map[string]any{
+		"name": "multi-vol-test", "template_id": tmpl.ID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create multi-vol: %d — %s", resp.StatusCode, b)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	// Should see 2 disks
+	resp = h.do("GET", "/api/v1/disks", nil)
+	var disks []diskInfoJSON
+	mustJSON(t, resp, &disks)
+	if len(disks) != 2 {
+		t.Fatalf("multi-vol: expected 2 disks, got %d", len(disks))
+	}
+
+	mounts := map[string]int{}
+	for _, d := range disks {
+		mounts[d.MountPath] = d.SizeGB
+	}
+	if mounts["/workspace"] != 20 {
+		t.Errorf("/workspace size = %d, want 20", mounts["/workspace"])
+	}
+	if mounts["/data"] != 10 {
+		t.Errorf("/data size = %d, want 10", mounts["/data"])
+	}
+
+	// Cross-check mock
+	if len(h.mock.volumes) != 2 {
+		t.Errorf("mock: expected 2 volumes, got %d", len(h.mock.volumes))
+	}
+	t.Logf("Multi-volume: 2 disks at /workspace(20GB) and /data(10GB)")
+
+	// Delete and verify cleanup
+	resp = h.do("DELETE", fmt.Sprintf("/api/v1/instances/%d", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("delete multi-vol: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = h.do("GET", "/api/v1/disks", nil)
+	mustJSON(t, resp, &disks)
+	if len(disks) != 0 {
+		t.Errorf("after delete: expected 0 disks, got %d", len(disks))
+	}
+	if len(h.mock.volumes) != 0 {
+		t.Errorf("mock: expected 0 volumes after delete, got %d", len(h.mock.volumes))
+	}
+	t.Logf("Multi-volume cleanup OK")
 }

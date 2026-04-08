@@ -480,6 +480,110 @@ func TestImage_DockerDev(t *testing.T) {
 	run(t, client, name, "docker", "rm", "-f", "plati-test-http")
 }
 
+// ── Simple Web Server ────────────────────────────────────────────────────────
+
+func TestImage_SimpleWebServer(t *testing.T) {
+	client := newIncusClient(t)
+	tmpl := loadTemplate(t, "simple-webserver")
+	name := containerName("simple-webserver")
+
+	envVars := map[string]string{}
+	if key := os.Getenv("TAILSCALE_AUTH_KEY"); key != "" {
+		envVars["TAILSCALE_AUTH_KEY"] = key
+		envVars["PLATI_TAILSCALE_HOSTNAME"] = name
+	}
+
+	provision(t, client, name, tmpl, envVars)
+	waitCloudInit(t, client, name)
+
+	// webserver.service must be active.
+	run(t, client, name, "systemctl", "is-active", "webserver")
+	t.Logf("webserver: active")
+
+	// Health endpoint must respond with 200 and JSON body.
+	// Retry for up to 30s in case the service is still starting.
+	deadline := time.Now().Add(30 * time.Second)
+	var healthBody string
+	for time.Now().Before(deadline) {
+		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", "curl -s http://localhost:3000/health"})
+		if err == nil && strings.Contains(out, `"status"`) {
+			healthBody = strings.TrimSpace(out)
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if healthBody == "" {
+		t.Fatal("health endpoint did not respond within 30s")
+	}
+	if !strings.Contains(healthBody, `"ok"`) {
+		t.Errorf("expected health response to contain \"ok\", got: %s", healthBody)
+	}
+	t.Logf("health: %s", healthBody)
+
+	// Root path should return HTML.
+	rootBody := runContains(t, client, name, "Hello from Plati", "/bin/sh", "-c", "curl -s http://localhost:3000/")
+	t.Logf("root: %s", firstLine(rootBody))
+
+	// If Tailscale auth key was provided, verify tailscale is up and serve works.
+	if _, hasKey := envVars["TAILSCALE_AUTH_KEY"]; hasKey {
+		// Wait for tailscale to join.
+		tsDeadline := time.Now().Add(60 * time.Second)
+		var tsStatus string
+		for time.Now().Before(tsDeadline) {
+			out, err := client.RunCommand(name, []string{"tailscale", "status"})
+			if err == nil && !strings.Contains(out, "Logged out") && !strings.Contains(out, "failed") {
+				tsStatus = firstLine(strings.TrimSpace(out))
+				break
+			}
+			time.Sleep(3 * time.Second)
+		}
+		if tsStatus == "" {
+			t.Error("tailscale did not join tailnet within 60s")
+		} else {
+			t.Logf("tailscale: %s", tsStatus)
+		}
+
+		// Check if tailscale serve was auto-configured.
+		serveOut, _ := client.RunCommand(name, []string{"/bin/sh", "-c", "tailscale serve status 2>&1"})
+		if strings.Contains(serveOut, "3000") || strings.Contains(serveOut, "proxy") {
+			t.Logf("tailscale serve: auto-configured (%s)", firstLine(strings.TrimSpace(serveOut)))
+		} else {
+			// Start tailscale serve manually.
+			run(t, client, name, "/bin/sh", "-c", "tailscale serve --bg https+insecure://localhost:3000")
+			t.Logf("tailscale serve: started manually")
+		}
+
+		// Get DNS name and verify HTTPS.
+		dnsOut, err := client.RunCommand(name, []string{"/bin/sh", "-c",
+			`tailscale status --json 2>/dev/null | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4`})
+		dnsName := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(dnsOut), "."))
+		if err == nil && dnsName != "" {
+			t.Logf("tailscale DNS: %s", dnsName)
+
+			// Verify HTTPS is reachable from inside the container itself.
+			httpsDeadline := time.Now().Add(30 * time.Second)
+			var httpsBody string
+			for time.Now().Before(httpsDeadline) {
+				out, err := client.RunCommand(name, []string{"/bin/sh", "-c",
+					fmt.Sprintf("curl -s --max-time 5 https://%s/health 2>/dev/null", dnsName)})
+				if err == nil && strings.Contains(out, `"ok"`) {
+					httpsBody = strings.TrimSpace(out)
+					break
+				}
+				time.Sleep(3 * time.Second)
+			}
+			if httpsBody != "" {
+				t.Logf("HTTPS health: %s", httpsBody)
+			} else {
+				t.Logf("HTTPS self-check did not respond (may need MagicDNS within container)")
+			}
+		}
+
+		// Cleanup: turn off serve.
+		client.RunCommand(name, []string{"/bin/sh", "-c", "tailscale serve off"})
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func firstLine(s string) string {

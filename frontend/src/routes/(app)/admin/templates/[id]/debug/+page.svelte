@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { admin, templates as templatesApi, instances as instancesApi } from '$lib/api';
   import Terminal from '$lib/components/Terminal.svelte';
-  import type { Template, Instance, MixinInfo } from '$lib/api/types';
+  import type { Template, Instance, MixinInfo, TailscaleServeResult } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -34,6 +34,9 @@
   let duplicateName = $state('');
   let duplicateSlug = $state('');
 
+  let tsServeStatus = $state<TailscaleServeResult | null>(null);
+  let tsServeLoading = $state(false);
+
   // Persistence dirs editing
   type PersistenceDir = { path: string; size: string; pool: string };
   let persistenceDirs: PersistenceDir[] = $state([]);
@@ -44,6 +47,10 @@
   );
   let parsedIncludes: string[] = $derived(
     (() => { try { return JSON.parse(editingTemplate?.includes ?? '[]'); } catch { return []; } })()
+  );
+  let hasVSCode = $derived(parsedIncludes.includes('openvscode-server'));
+  let parsedRepos: { name: string; dest: string }[] = $derived(
+    (() => { try { return JSON.parse(editingTemplate?.repos ?? '[]'); } catch { return []; } })()
   );
 
   // ── Load ───────────────────────────────────────────────────────────────────
@@ -123,6 +130,11 @@
     return () => { ws.close(); clearInterval(timer); };
   });
 
+  $effect(() => {
+    if (!browser || debugInstance?.status !== 'running') return;
+    loadTsServeStatus();
+  });
+
   // ── Instance tab actions ───────────────────────────────────────────────────
 
   async function createDebugInstance() {
@@ -158,6 +170,34 @@
       debugInstance = null;
       logItems = [];
     } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function loadTsServeStatus() {
+    if (!browser || !debugInstance || debugInstance.status !== 'running') return;
+    try {
+      tsServeStatus = await instancesApi.tailscaleServeStatus(debugInstance.id);
+    } catch { tsServeStatus = null; }
+  }
+
+  async function startVsCodeServe() {
+    if (!debugInstance) return;
+    tsServeLoading = true;
+    try {
+      tsServeStatus = await instancesApi.tailscaleServe(debugInstance.id, 3463);
+      addNotification('success', 'Tailscale Serve started on port 3463');
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { tsServeLoading = false; }
+  }
+
+  async function stopTsServe() {
+    if (!debugInstance) return;
+    tsServeLoading = true;
+    try {
+      await instancesApi.tailscaleServeOff(debugInstance.id);
+      tsServeStatus = { status: 'off', url: '', port: 0 };
+      addNotification('success', 'Tailscale Serve stopped');
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { tsServeLoading = false; }
   }
 
   // ── Step runner ────────────────────────────────────────────────────────────
@@ -386,6 +426,31 @@
         <!-- Terminals when running -->
         {#if debugInstance.status === 'running'}
           <div class="space-y-4">
+            {#if hasVSCode && debugInstance.ip_address}
+              <div class="bg-white border rounded-lg p-4">
+                <p class="text-sm font-medium text-gray-700 mb-2">OpenVSCode Server</p>
+                {#if tsServeStatus?.status === 'active' && tsServeStatus.port === 3463 && tsServeStatus.url}
+                  <div class="flex items-center gap-2">
+                    <a href={tsServeStatus.url} target="_blank" rel="noopener noreferrer"
+                      class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                    >Open in VSCode ↗</a>
+                    <span class="text-xs text-gray-500 font-mono truncate max-w-xs">{tsServeStatus.url}</span>
+                    <button onclick={stopTsServe} disabled={tsServeLoading}
+                      class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm"
+                    >{tsServeLoading ? 'Stopping…' : 'Stop'}</button>
+                  </div>
+                {:else}
+                  <div class="flex items-center gap-2">
+                    <a href={`http://${debugInstance.ip_address}:3463`} target="_blank" rel="noopener noreferrer"
+                      class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                    >Open in VSCode ↗</a>
+                    <button onclick={startVsCodeServe} disabled={tsServeLoading}
+                      class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm"
+                    >{tsServeLoading ? 'Starting…' : 'Serve via Tailscale'}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
             <div class="bg-white border rounded-lg overflow-hidden">
               <div class="px-4 py-2 border-b bg-gray-50">
                 <span class="text-sm font-medium">Terminal — root</span>
@@ -432,7 +497,7 @@
                 <button
                   onclick={runReapplySetup}
                   disabled={execRunning}
-                  class="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-50"
+                  class="px-3 py-1 bg-primary text-white text-sm rounded hover:bg-primary-dark disabled:opacity-50"
                 >RUN</button>
               </div>
               <div class="flex-1 border rounded p-3">
@@ -441,11 +506,32 @@
                 <button
                   onclick={() => runExec('cat /etc/profile.d/plati-env.sh 2>/dev/null || echo "(not found)"')}
                   disabled={execRunning}
-                  class="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-50"
+                  class="px-3 py-1 bg-primary text-white text-sm rounded hover:bg-primary-dark disabled:opacity-50"
                 >RUN</button>
               </div>
             </div>
           </div>
+
+          <!-- Repos -->
+          {#if parsedRepos.length > 0}
+            <div class="bg-white border rounded-lg p-4">
+              <h3 class="font-medium mb-3">Repos</h3>
+              <div class="space-y-2">
+                {#each parsedRepos as ref}
+                  <div class="flex items-center gap-3 text-sm bg-gray-50 border rounded px-3 py-2">
+                    <a href="/admin/repos" class="font-mono text-primary hover:text-primary-dark hover:underline shrink-0">{ref.name}</a>
+                    <span class="text-gray-400 shrink-0">→</span>
+                    <span class="font-mono text-gray-600 flex-1 truncate">{ref.dest}</span>
+                    <button
+                      onclick={() => runExec(`[ -d "${ref.dest}" ] && [ "$(ls -A ${ref.dest} 2>/dev/null)" ] && echo "SKIP: ${ref.dest} already exists and is not empty" || cp -rp /plati-repos/${ref.name} ${ref.dest} && echo "Copied ${ref.name} to ${ref.dest}"`)}
+                      disabled={execRunning}
+                      class="shrink-0 px-2 py-0.5 bg-teal-600 text-white rounded text-xs hover:bg-teal-700 disabled:opacity-50"
+                    >Copy Repo</button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
 
           <!-- first_init_commands -->
           {#if parsedFirstInitCmds.length > 0}
@@ -496,7 +582,7 @@
                             <button
                               onclick={() => runExec(cmd)}
                               disabled={execRunning}
-                              class="shrink-0 px-2 py-0.5 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 disabled:opacity-50"
+                              class="shrink-0 px-2 py-0.5 bg-primary text-white rounded text-xs hover:bg-primary-dark disabled:opacity-50"
                             >RUN</button>
                           </div>
                         {/each}
@@ -561,7 +647,7 @@
         <div class="bg-white border rounded-lg p-4">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-medium">Workspace Directories</h3>
-            <button onclick={addDirRow} class="text-sm text-indigo-600 hover:text-indigo-800">+ Add</button>
+            <button onclick={addDirRow} class="text-sm text-primary hover:text-primary-dark">+ Add</button>
           </div>
           {#if persistenceDirs.length === 0}
             <p class="text-sm text-gray-500">(no directories)</p>
@@ -606,7 +692,7 @@
             <h3 class="font-medium">first_init_commands</h3>
             <button
               onclick={() => updateFirstInitCmds([...parsedFirstInitCmds, ''])}
-              class="text-sm text-indigo-600 hover:text-indigo-800"
+              class="text-sm text-primary hover:text-primary-dark"
             >+ Add</button>
           </div>
           {#if parsedFirstInitCmds.length === 0}
@@ -640,7 +726,7 @@
         <div class="flex gap-3">
           <button
             onclick={saveTemplate}
-            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark"
           >Save Template</button>
           <button
             onclick={exportYAML}

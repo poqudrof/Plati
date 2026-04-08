@@ -115,7 +115,7 @@
       <button
         onclick={savePrefs}
         disabled={savingPrefs}
-        class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+        class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50"
       >
         {savingPrefs ? 'Saving...' : 'Save Preferences'}
       </button>
@@ -146,7 +146,7 @@
     <div class="border-t pt-4 space-y-3">
       <input bind:value={newSecretName} placeholder="SECRET_NAME" class="w-full px-3 py-2 border rounded" />
       <input bind:value={newSecretValue} type="password" placeholder="Secret value" class="w-full px-3 py-2 border rounded" />
-      <button onclick={addSecret} class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">
+      <button onclick={addSecret} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">
         Add Secret
       </button>
     </div>

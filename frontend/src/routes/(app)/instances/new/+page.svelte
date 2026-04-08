@@ -64,6 +64,29 @@
       <TemplateSelector templates={templateList} bind:selected={selectedTemplate} />
     </div>
 
+    {#if selectedTemplateMeta()}
+      {@const meta = selectedTemplateMeta()!}
+      {@const dirs = (() => { try { return JSON.parse(meta.persistence_dirs || '[]') as {path: string; size: string; pool?: string}[]; } catch { return []; } })()}
+      <div class="bg-gray-50 rounded-lg p-4 border">
+        <p class="text-sm font-medium text-gray-700 mb-2">Storage</p>
+        {#if meta.persistence_mode === 'ephemeral'}
+          <p class="text-sm text-amber-700">This template uses ephemeral storage. All data is lost on rebuild or delete.</p>
+        {:else}
+          <p class="text-sm text-green-700 mb-2">Persistent volumes survive rebuilds. Only delete destroys data.</p>
+          {#each dirs as dir}
+            <div class="flex items-center gap-2 text-sm text-gray-600">
+              <span class="font-mono bg-white px-2 py-0.5 rounded border">{dir.path}</span>
+              <span class="text-gray-400">&mdash;</span>
+              <span>{dir.size}</span>
+              {#if dir.pool}
+                <span class="text-xs text-gray-400">(pool: {dir.pool})</span>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
+
     <!-- Advanced section -->
     <div class="border-t pt-4">
       <button
@@ -109,7 +132,7 @@
     <button
       onclick={create}
       disabled={loading || !name || !selectedTemplate}
-      class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+      class="btn-primary disabled:opacity-50"
     >
       {loading ? 'Creating...' : 'Create Instance'}
     </button>

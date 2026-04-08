@@ -93,15 +93,33 @@ func main() {
 	// Keys directory: {config_dir}/ssh_keys/
 	keysDir := filepath.Join(filepath.Dir(*configPath), "ssh_keys")
 
+	// Repos directory: {config_dir}/repos/ (or configured path)
+	reposDir := cfg.ReposDir
+	if reposDir != "" && !filepath.IsAbs(reposDir) {
+		reposDir = filepath.Join(filepath.Dir(*configPath), reposDir)
+	}
+	if reposDir != "" {
+		if err := os.MkdirAll(reposDir, 0755); err != nil {
+			log.Printf("warning: create repos dir %s: %v", reposDir, err)
+		}
+	}
+
+	// Resolve templates directory (relative to config file location)
+	templatesDir := cfg.TemplatesDir
+	if templatesDir != "" && !filepath.IsAbs(templatesDir) {
+		templatesDir = filepath.Join(filepath.Dir(*configPath), templatesDir)
+	}
+
 	// Init services
 	userSvc, err := services.NewUserService(db, cfg.SecretEncryptionKey, keysDir)
 	if err != nil {
 		log.Fatalf("init user service: %v", err)
 	}
-	templateSvc := services.NewTemplateService(db)
+	templateSvc := services.NewTemplateService(db, templatesDir)
 	prefSvc := services.NewPreferencesService(db)
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir)
+	repoSvc := services.NewRepoService(db, userSvc, reposDir)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, keysDir)
 
@@ -110,14 +128,14 @@ func main() {
 		log.Printf("warning: sync servers: %v", err)
 	}
 
-	// Sync templates from YAML files on disk (resolve relative to config file location)
-	templatesDir := cfg.TemplatesDir
-	if templatesDir != "" && !filepath.IsAbs(templatesDir) {
-		templatesDir = filepath.Join(filepath.Dir(*configPath), templatesDir)
-	}
+	// Sync templates from YAML files on disk and watch for changes
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	if templatesDir != "" {
 		if err := templateSvc.SyncFromDir(templatesDir); err != nil {
 			log.Printf("warning: sync templates: %v", err)
+		}
+		if err := templateSvc.WatchDir(bgCtx, templatesDir); err != nil {
+			log.Printf("warning: watch templates: %v", err)
 		}
 	}
 
@@ -142,6 +160,9 @@ func main() {
 	terminalHandler := handlers.NewTerminalHandler(db, pool, instanceSvc.CreationLogs())
 	prefsHandler := handlers.NewPreferencesHandler(prefSvc)
 	adminSettingsHandler := handlers.NewAdminSettingsHandler(adminSvc)
+	repoHandler := handlers.NewRepoHandler(repoSvc)
+	storageSvc := services.NewStorageService(db, pool)
+	storageHandler := handlers.NewStorageHandler(storageSvc)
 
 	// Build router
 	r := router.New(router.Deps{
@@ -157,6 +178,8 @@ func main() {
 		TerminalHandler:      terminalHandler,
 		PreferencesHandler:   prefsHandler,
 		AdminSettingsHandler: adminSettingsHandler,
+		RepoHandler:          repoHandler,
+		StorageHandler:       storageHandler,
 		JWTSecret:            cfg.Auth.JWTSecret,
 		FrontendURL:          cfg.Server.FrontendURL,
 	})
@@ -184,6 +207,7 @@ func main() {
 	<-quit
 
 	log.Println("shutting down...")
+	bgCancel()
 	sleepSvc.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -118,6 +118,31 @@ func (h *InstanceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+func (h *InstanceHandler) ListDisks(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	disks, err := queries.ListUserDisks(h.db, user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list disks")
+		return
+	}
+	writeJSON(w, http.StatusOK, disks)
+}
+
+func (h *InstanceHandler) Volumes(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	info, err := h.svc.GetStorageInfo(id, user.ID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
+}
+
 func (h *InstanceHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	id, err := parseID(r, "id")
@@ -229,6 +254,21 @@ func (h *InstanceHandler) TailscaleServeStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	result, err := h.svc.TailscaleServeStatus(id, user.ID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *InstanceHandler) TailscaleStatus(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	result, err := h.svc.GetTailscaleStatus(id, user.ID)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return

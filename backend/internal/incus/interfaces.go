@@ -2,10 +2,34 @@ package incus
 
 import (
 	"io"
+	"time"
 
 	"github.com/gorilla/websocket"
 	incusapi "github.com/lxc/incus/v6/shared/api"
 )
+
+// FileEntry represents a file or directory inside an instance (SVAR-compatible shape).
+type FileEntry struct {
+	ID   string `json:"id"`   // full path
+	Name string `json:"name"` // basename
+	Type string `json:"type"` // "file" or "folder"
+	Size int64  `json:"size"`
+	Date int64  `json:"date"` // unix timestamp
+}
+
+// FileInfo holds metadata about a single file retrieved from an instance.
+type FileInfo struct {
+	UID  int64
+	GID  int64
+	Mode int
+	Type string // "file" or "directory"
+}
+
+// VolumeSnapshotInfo represents a storage volume snapshot.
+type VolumeSnapshotInfo struct {
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 // IncusClient abstracts Incus server operations for testing.
 type IncusClient interface {
@@ -38,6 +62,20 @@ type IncusClient interface {
 	// Config
 	UpdateInstanceConfig(name string, config map[string]string) error
 
+	// Devices
+	AttachHostPath(instanceName, deviceName, hostPath, instancePath string) error
+
 	// Server info
 	GetServerResources() (*incusapi.Resources, error)
+
+	// Storage file operations
+	ListDirectory(instanceName, path string) ([]FileEntry, error)
+	GetFile(instanceName, path string) (io.ReadCloser, *FileInfo, error)
+	StreamDirectory(instanceName, path string) (io.ReadCloser, error)
+
+	// Volume snapshots
+	ListVolumeSnapshots(pool, volumeName string) ([]VolumeSnapshotInfo, error)
+	CreateVolumeSnapshot(pool, volumeName, snapshotName string) error
+	DeleteVolumeSnapshot(pool, volumeName, snapshotName string) error
+	RestoreVolumeSnapshot(pool, volumeName, snapshotName string) error
 }
