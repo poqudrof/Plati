@@ -3,7 +3,7 @@
 slug: my-template          # Unique ID: lowercase letters, digits, hyphens
 description: What this template provides
 
-# Incus image. Append /cloud for cloud-init support (Ubuntu, Debian, Fedora).
+# Incus image.
 image: images:ubuntu/24.04/cloud
 
 profiles:
@@ -40,16 +40,7 @@ rebuild_commands:
 includes:
   - tailscale   # Tailscale VPN with auto-naming
   - sshx        # SSHX collaborative terminal
-  - docker      # Docker Engine
-
-# Cloud-init YAML — only runs on /cloud images.
-cloud_init: |
-  #cloud-config
-  packages:
-    - git
-    - curl
-  runcmd:
-    - echo "setup complete"`;
+  - docker      # Docker Engine`;
 
   const minimalExample = `name: Bare Ubuntu
 slug: bare-ubuntu
@@ -62,7 +53,7 @@ resources:
   memory: 1GB
   disk: 5GB`;
 
-  const noCloudInitExample = `name: Alpine Dev
+  const alpineExample = `name: Alpine Dev
 slug: alpine-dev
 description: Alpine Linux 3.20 with git and curl
 image: images:alpine/3.20
@@ -72,11 +63,11 @@ resources:
   cpu: 1
   memory: 1GB
   disk: 10GB
-post_create_commands:
+first_init_commands:
   - apk add --no-cache git curl openssh-client
   - mkdir -p /workspace`;
 
-  const cloudInitExample = `name: Python Dev
+  const pythonExample = `name: Python Dev
 slug: python-dev
 description: Python 3.12 development environment
 image: images:ubuntu/24.04/cloud
@@ -86,15 +77,11 @@ resources:
   cpu: 2
   memory: 4GB
   disk: 20GB
-cloud_init: |
-  #cloud-config
-  packages:
-    - git
-    - python3
-    - python3-pip
-    - python3-venv
-  runcmd:
-    - pip3 install poetry`;
+terminal_user: ubuntu
+first_init_commands:
+  - apt-get update -y
+  - apt-get install -y git python3 python3-pip python3-venv
+  - pip3 install poetry`;
 
   const dockerExample = `name: Docker Dev
 slug: docker-dev
@@ -169,24 +156,16 @@ first_init_commands:
   <!-- Initialization Order -->
   <section class="mb-10">
     <h2 class="text-xl font-semibold mb-3">Initialization Order</h2>
-    <p class="text-gray-600 text-sm mb-4">Every instance goes through two phases after creation:</p>
-    <div class="space-y-3">
-      <div class="bg-white border rounded-lg p-4">
-        <h3 class="text-sm font-semibold mb-1">Phase 1 — cloud-init <span class="font-normal text-gray-500">(only on <code class="bg-gray-100 px-1 rounded">/cloud</code> images)</span></h3>
-        <p class="text-sm text-gray-600">Runs on first boot via the cloud-init daemon. Handles package install, <code class="bg-gray-100 px-1 rounded">runcmd</code>, <code class="bg-gray-100 px-1 rounded">write_files</code>, and user creation. Not available on Alpine or other non-cloud images.</p>
-      </div>
-      <div class="bg-white border rounded-lg p-4">
-        <h3 class="text-sm font-semibold mb-1">Phase 2 — incus exec <span class="font-normal text-gray-500">(all images)</span></h3>
-        <p class="text-sm text-gray-600 mb-2">Runs after the instance starts, always, regardless of image type. Injects:</p>
-        <ul class="space-y-1 text-sm text-gray-600 list-disc list-inside">
-          <li>SSH <code class="bg-gray-100 px-1 rounded">authorized_keys</code> for root (and <code class="bg-gray-100 px-1 rounded">terminal_user</code> if set)</li>
-          <li>Private key files into <code class="bg-gray-100 px-1 rounded">~/.ssh/</code></li>
-          <li>Secrets as env vars in <code class="bg-gray-100 px-1 rounded">/etc/profile.d/plati-env.sh</code></li>
-          <li><code class="bg-gray-100 px-1 rounded">post_create_commands</code> — your custom shell commands</li>
-        </ul>
-      </div>
+    <p class="text-gray-600 text-sm mb-4">After the instance starts, Plati runs setup steps via <code class="bg-gray-100 px-1 rounded">incus exec</code>:</p>
+    <div class="bg-white border rounded-lg p-4">
+      <ul class="space-y-1 text-sm text-gray-600 list-disc list-inside">
+        <li>SSH <code class="bg-gray-100 px-1 rounded">authorized_keys</code> for root (and <code class="bg-gray-100 px-1 rounded">terminal_user</code> if set)</li>
+        <li>Private key files into <code class="bg-gray-100 px-1 rounded">~/.ssh/</code></li>
+        <li>Secrets as env vars in <code class="bg-gray-100 px-1 rounded">/etc/profile.d/plati-env.sh</code></li>
+        <li>Mixin commands (from <code class="bg-gray-100 px-1 rounded">includes</code>)</li>
+        <li><code class="bg-gray-100 px-1 rounded">first_init_commands</code> on first create, <code class="bg-gray-100 px-1 rounded">rebuild_commands</code> on rebuild</li>
+      </ul>
     </div>
-    <p class="text-xs text-gray-400 mt-3">Use <code class="bg-gray-100 px-1 rounded">post_create_commands</code> for setup that must work on all images (including Alpine). Use <code class="bg-gray-100 px-1 rounded">cloud_init</code> when you need first-boot ordering guarantees or <code class="bg-gray-100 px-1 rounded">write_files</code>.</p>
   </section>
 
   <!-- Mixins -->
@@ -235,32 +214,32 @@ first_init_commands:
         <pre class="p-4 text-xs overflow-x-auto"><code>{minimalExample}</code></pre>
       </div>
 
-      <!-- Without cloud-init -->
+      <!-- Alpine -->
       <div class="bg-white border rounded-lg overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b">
           <div>
-            <h3 class="font-medium text-sm">Without cloud-init</h3>
-            <p class="text-xs text-gray-500 mt-0.5">Alpine Linux — uses <code class="bg-gray-100 px-1 rounded">post_create_commands</code> for setup</p>
+            <h3 class="font-medium text-sm">Alpine Linux</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Lightweight — uses <code class="bg-gray-100 px-1 rounded">first_init_commands</code> for setup</p>
           </div>
-          <button onclick={() => copyToClipboard(noCloudInitExample, 'noci')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
-            {copied === 'noci' ? 'Copied!' : 'Copy YAML'}
+          <button onclick={() => copyToClipboard(alpineExample, 'alpine')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
+            {copied === 'alpine' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
-        <pre class="p-4 text-xs overflow-x-auto"><code>{noCloudInitExample}</code></pre>
+        <pre class="p-4 text-xs overflow-x-auto"><code>{alpineExample}</code></pre>
       </div>
 
-      <!-- With cloud-init -->
+      <!-- Python -->
       <div class="bg-white border rounded-lg overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b">
           <div>
-            <h3 class="font-medium text-sm">With cloud-init</h3>
-            <p class="text-xs text-gray-500 mt-0.5">Ubuntu <code class="bg-gray-100 px-1 rounded">/cloud</code> image — packages and commands on first boot</p>
+            <h3 class="font-medium text-sm">Python Dev</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Ubuntu with Python 3 and Poetry</p>
           </div>
-          <button onclick={() => copyToClipboard(cloudInitExample, 'ci')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
-            {copied === 'ci' ? 'Copied!' : 'Copy YAML'}
+          <button onclick={() => copyToClipboard(pythonExample, 'python')} class="text-xs px-3 py-1 rounded bg-primary-50 text-primary hover:bg-primary-50">
+            {copied === 'python' ? 'Copied!' : 'Copy YAML'}
           </button>
         </div>
-        <pre class="p-4 text-xs overflow-x-auto"><code>{cloudInitExample}</code></pre>
+        <pre class="p-4 text-xs overflow-x-auto"><code>{pythonExample}</code></pre>
       </div>
 
       <!-- Docker -->
@@ -298,7 +277,7 @@ first_init_commands:
     <h2 class="text-xl font-semibold mb-3">Tips</h2>
     <div class="bg-white border rounded-lg p-4 space-y-3 text-sm text-gray-600">
       <p><b>Slug must be unique.</b> If you add a template with a slug that already exists, the duplicate will be skipped on reload. Rename the slug or delete the conflicting file to resolve.</p>
-      <p><b>Keep cloud-init fast.</b> Long cloud-init scripts delay instance startup. For heavy toolchains, consider building a custom Incus image instead.</p>
+      <p><b>Keep setup fast.</b> Long init scripts delay instance startup. For heavy toolchains, consider building a custom Incus image instead.</p>
       <p><b>Persistence modes.</b> Use <code class="bg-gray-100 px-1 rounded">persistence.mode: normal</code> (default) for persistent workspace volumes that survive rebuilds. Use <code class="bg-gray-100 px-1 rounded">ephemeral</code> for throwaway instances where all storage is wiped on rebuild.</p>
       <p><b>Workspace volume.</b> In <code class="bg-gray-100 px-1 rounded">normal</code> mode, persistent volumes are mounted per the <code class="bg-gray-100 px-1 rounded">persistence.directories</code> list. A sentinel file distinguishes first init from rebuild.</p>
       <p><b>Profiles.</b> Use Incus profiles to configure networking, storage pools, and device passthrough. The <code class="bg-gray-100 px-1 rounded">default</code> profile provides a bridged network. Add <code class="bg-gray-100 px-1 rounded">docker</code> for Docker support and <code class="bg-gray-100 px-1 rounded">nvidia</code> for GPU passthrough.</p>

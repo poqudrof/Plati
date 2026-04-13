@@ -60,7 +60,6 @@
       image: template.image,
       profiles: JSON.stringify(profiles),
       resources: JSON.stringify(resources),
-      cloud_init: template.cloud_init,
       terminal_user: template.terminal_user,
       persistence_mode: template.persistence_mode,
       persistence_dirs: JSON.stringify(persistenceDirs),
@@ -99,6 +98,21 @@
       dirty = false;
     } catch (e: any) {
       addNotification('error', 'Save failed: ' + e.message);
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function reloadFromDisk() {
+    if (!template) return;
+    saving = true;
+    try {
+      const updated = await admin.templates.reloadFromDisk(template.id);
+      template = updated;
+      loadFromTemplate(updated);
+      addNotification('success', 'Reloaded from disk');
+    } catch (e: any) {
+      addNotification('error', 'Reload from disk failed: ' + e.message);
     } finally {
       saving = false;
     }
@@ -208,6 +222,7 @@
       </div>
       <div class="flex items-center gap-2">
         <a href="/admin/templates/{template.id}/debug" class="px-3 py-1.5 text-sm text-purple-600 hover:text-purple-800 border border-purple-200 rounded hover:bg-purple-50">Debug</a>
+        <button onclick={reloadFromDisk} disabled={saving} class="px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50" title="Re-read this template's YAML file from disk and update the database">Reload from disk</button>
         <button onclick={saveToDB} disabled={saving} class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">Save to DB</button>
         <button onclick={saveToDisk} disabled={saving} class="px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50">
           {saving ? 'Saving...' : 'Save to Disk'}
@@ -281,33 +296,34 @@
             <input type="text" bind:value={template.terminal_user} oninput={markDirty} placeholder="e.g. ubuntu" class="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:border-primary outline-none" />
           </FieldRow>
 
-          <FieldRow label="Cloud-Init" description="Cloud-init user-data. SSH keys are appended automatically by the platform.">
-            <textarea bind:value={template.cloud_init} oninput={markDirty} rows="6" class="w-full px-2 py-1.5 border border-gray-200 rounded text-xs font-mono bg-gray-50 focus:bg-white focus:border-primary outline-none resize-y"></textarea>
-          </FieldRow>
         </div>
       </CollapsibleSection>
 
       <!-- Persistence -->
       <CollapsibleSection title="Persistence" description="How storage survives instance rebuild">
-        <div class="space-y-3">
+        <div class="space-y-4">
           <FieldRow label="Mode">
             <select
               value={template.persistence_mode === 'ephemeral' ? 'ephemeral' : 'normal'}
               onchange={(e) => { template!.persistence_mode = (e.target as HTMLSelectElement).value; markDirty(); }}
               class="w-full px-2 py-1.5 border border-gray-200 rounded text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none"
             >
-              <option value="normal">Normal</option>
-              <option value="ephemeral">Ephemeral</option>
+              <option value="normal">Normal — persistent volumes survive rebuilds</option>
+              <option value="ephemeral">Ephemeral — all storage wiped on rebuild/delete</option>
             </select>
-            {#if template.persistence_mode === 'ephemeral'}
-              <p class="text-xs text-amber-600 mt-1.5">All instance storage is wiped on rebuild or delete. No volumes are created. Best for stateless workloads or quick throwaway environments.</p>
-            {:else}
-              <p class="text-xs text-gray-500 mt-1.5">Persistent volumes are created and mounted at the directories below. They survive instance rebuilds, so workspace data is preserved across re-initializations.</p>
-            {/if}
           </FieldRow>
 
-          {#if template.persistence_mode !== 'ephemeral'}
-            <FieldRow label="Directories" description="Each entry creates a separate Incus storage volume">
+          {#if template.persistence_mode === 'ephemeral'}
+            <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-1">
+              <p class="text-xs font-semibold text-amber-800">Ephemeral mode</p>
+              <p class="text-xs text-amber-700">No Incus volumes are created. All data lives on the instance's root disk and is <strong>permanently deleted</strong> when the instance is rebuilt or deleted. <code class="font-mono bg-amber-100 px-1 rounded">first_init_commands</code> run on every creation (no sentinel file). Best for stateless workloads, CI runners, or quick throwaway environments.</p>
+            </div>
+          {:else}
+            <div class="rounded-md bg-blue-50 border border-blue-200 px-3 py-2.5 space-y-1">
+              <p class="text-xs font-semibold text-blue-800">Normal (persistent) mode</p>
+              <p class="text-xs text-blue-700">Incus storage volumes are created for each directory below and re-attached on rebuild — workspace data is preserved. A sentinel file (<code class="font-mono bg-blue-100 px-1 rounded">.plati-initialized</code>) distinguishes first creation from rebuilds: <code class="font-mono bg-blue-100 px-1 rounded">first_init_commands</code> run once on creation, <code class="font-mono bg-blue-100 px-1 rounded">rebuild_commands</code> run on subsequent rebuilds.</p>
+            </div>
+            <FieldRow label="Persistent directories" description="Each entry creates a separate Incus storage volume mounted at that path">
               <div class="mt-1">
                 <PersistenceDirEditor bind:dirs={persistenceDirs} />
               </div>
@@ -332,6 +348,11 @@
         </div>
       </CollapsibleSection>
 
+      <!-- Repositories -->
+      <CollapsibleSection title="Repositories" description="Git repos copied from host cache into the instance on first init">
+        <RepoListEditor bind:repos />
+      </CollapsibleSection>
+
       <!-- Lifecycle Commands -->
       <CollapsibleSection title="Lifecycle Commands" description="Shell commands run via incus exec after setup">
         <div class="space-y-4">
@@ -346,11 +367,6 @@
             </div>
           </FieldRow>
         </div>
-      </CollapsibleSection>
-
-      <!-- Repositories -->
-      <CollapsibleSection title="Repositories" description="Git repos copied from host cache into the instance" open={repos.length > 0}>
-        <RepoListEditor bind:repos />
       </CollapsibleSection>
 
       <!-- Networking -->

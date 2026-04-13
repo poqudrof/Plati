@@ -262,7 +262,7 @@ func (h *TerminalHandler) CreationStream(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// DebugLogs streams the cloud-init output log for any instance (admin only).
+// DebugLogs streams the boot log for any instance (admin only).
 // It waits for the log file to appear then tails it from the beginning.
 func (h *TerminalHandler) DebugLogs(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")
@@ -338,24 +338,16 @@ func (h *TerminalHandler) DebugLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Stream init logs: prefer journalctl (covers systemd + cloud-init), fall back to
-	// cloud-init output log and syslog if journalctl is absent.
+	// Stream init logs: prefer journalctl, fall back to syslog.
 	logScript := `
 if command -v journalctl > /dev/null 2>&1; then
     echo "=== Boot Journal ==="
     journalctl -b --no-pager -o short-iso 2>/dev/null
     echo ""
-    if [ -f /var/log/cloud-init-output.log ]; then
-        echo "=== cloud-init-output.log ==="
-        cat /var/log/cloud-init-output.log
-        echo ""
-    fi
     echo "=== Following journal ==="
     exec journalctl -b -f --no-pager -o short-iso 2>/dev/null
 else
-    echo "=== journalctl not found, trying log files ==="
-    cat /var/log/cloud-init-output.log 2>/dev/null || true
-    cat /var/log/cloud-init.log 2>/dev/null || true
+    echo "=== Log files ==="
     exec tail -f /var/log/syslog /var/log/messages 2>/dev/null || echo "(no log source found)"
 fi
 `

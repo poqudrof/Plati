@@ -2,7 +2,7 @@
   import { currentUser } from '$lib/stores/auth';
 
   const sections = [
-    { title: 'Templates', href: '/docs/templates', description: 'Learn how to create and configure instance templates with cloud-init, resources, and profiles.' },
+    { title: 'Templates', href: '/docs/templates', description: 'Learn how to create and configure instance templates with resources, profiles, and commands.' },
     { title: 'Instances', href: '/docs/instances', description: 'Managing your development workspaces: create, start, stop, rebuild, and connect via SSH.' },
     { title: 'Settings', href: '/docs/settings', description: 'Configure SSH keys and environment secrets for your instances.' },
   ];

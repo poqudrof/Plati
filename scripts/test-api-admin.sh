@@ -56,8 +56,7 @@ IMPORT_DATA='{
     "description": "Go development environment for testing",
     "image": "images:ubuntu/24.04",
     "profiles": ["default"],
-    "resources": {"cpu": 4, "memory": "8GB", "disk": "30GB"},
-    "cloud_init": "#cloud-config\npackages:\n  - git\n  - curl\n"
+    "resources": {"cpu": 4, "memory": "8GB", "disk": "30GB"}
 }'
 IMPORT_RESULT=$(api POST /api/v1/admin/templates/import -d "$IMPORT_DATA")
 IMPORT_ID=$(echo "$IMPORT_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
@@ -97,7 +96,6 @@ UPDATE_RESULT=$(api PUT "/api/v1/admin/templates/$IMPORT_ID" -d '{
     "image": "images:ubuntu/24.04",
     "profiles": "[\"default\"]",
     "resources": "{\"cpu\":4,\"memory\":\"8GB\"}",
-    "cloud_init": "",
     "is_active": true
 }')
 # Verify

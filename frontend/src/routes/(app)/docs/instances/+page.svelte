@@ -13,7 +13,7 @@
     <h2 class="text-xl font-semibold mb-4">Lifecycle</h2>
     <div class="bg-white border rounded-lg p-4">
       <ol class="space-y-3 text-sm text-gray-600">
-        <li><b>1. Create</b> — Pick a name and a template. Plati selects a server with capacity, creates a persistent workspace volume, launches the container with cloud-init, and injects your SSH keys.</li>
+        <li><b>1. Create</b> — Pick a name and a template. Plati selects a server with capacity, creates a persistent workspace volume, launches the container, and injects your SSH keys.</li>
         <li><b>2. Running</b> — The instance is up and reachable via SSH. Your workspace is at <code class="bg-gray-100 px-1 rounded">/workspace</code>.</li>
         <li><b>3. Stop</b> — Shuts the instance down gracefully. The workspace volume is preserved. Instances are auto-stopped after the configured inactivity timeout (default 4 hours).</li>
         <li><b>4. Start</b> — Boots a stopped instance back up. All data in <code class="bg-gray-100 px-1 rounded">/workspace</code> is intact.</li>
@@ -30,7 +30,7 @@
       <pre class="bg-gray-50 rounded p-3 text-xs font-mono">ssh ubuntu@&lt;instance-ip&gt;</pre>
       <p>The exact command is shown on the instance detail page. For it to work:</p>
       <ul class="list-disc list-inside space-y-1 ml-2">
-        <li>Add your SSH public key in <a href="/settings" class="text-primary underline">Settings</a> <b>before</b> creating the instance (keys are injected at creation time via cloud-init).</li>
+        <li>Add your SSH public key in <a href="/settings" class="text-primary underline">Settings</a> <b>before</b> creating the instance (keys are injected at creation time).</li>
         <li>If you added a key after creating the instance, <b>rebuild</b> it to inject the new key.</li>
         <li>The default user depends on the image. Ubuntu images use <code class="bg-gray-100 px-1 rounded">ubuntu</code>, Debian uses <code class="bg-gray-100 px-1 rounded">debian</code>, etc.</li>
       </ul>
@@ -50,7 +50,7 @@
         <tbody class="divide-y">
           <tr>
             <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800">creating</span></td>
-            <td class="px-4 py-2 text-gray-600">Instance is being provisioned. Cloud-init is running.</td>
+            <td class="px-4 py-2 text-gray-600">Instance is being provisioned.</td>
           </tr>
           <tr>
             <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">running</span></td>

@@ -6,71 +6,9 @@ import (
 	"testing"
 )
 
-func TestBuildInstanceConfig_CloudInitSet(t *testing.T) {
-	cloudInit := "#cloud-config\npackages:\n  - git\n"
-	cfg := BuildInstanceConfig(cloudInit, nil, nil, nil)
-
-	userData, ok := cfg["user.user-data"]
-	if !ok {
-		t.Fatal("user.user-data not set — cloud-config will not be applied")
-	}
-	if !strings.HasPrefix(userData, "#cloud-config") {
-		t.Errorf("user.user-data does not start with #cloud-config: %q", userData[:min(len(userData), 40)])
-	}
-}
-
-func TestBuildInstanceConfig_NoCloudInitWhenEmpty(t *testing.T) {
-	cfg := BuildInstanceConfig("", nil, nil, nil)
-	if _, ok := cfg["user.user-data"]; ok {
-		t.Error("user.user-data should not be set when cloudInit is empty")
-	}
-}
-
-func TestBuildInstanceConfig_SSHKeysAppended(t *testing.T) {
-	cloudInit := "#cloud-config\npackages:\n  - git\n"
-	keys := []string{"ssh-rsa AAAA key1", "ssh-rsa BBBB key2"}
-	cfg := BuildInstanceConfig(cloudInit, keys, nil, nil)
-
-	userData := cfg["user.user-data"]
-	if !strings.Contains(userData, "ssh_authorized_keys") {
-		t.Error("ssh_authorized_keys block missing from user.user-data")
-	}
-	for _, k := range keys {
-		if !strings.Contains(userData, k) {
-			t.Errorf("SSH key %q missing from user.user-data", k)
-		}
-	}
-}
-
-func TestBuildInstanceConfig_SSHKeysNotAppendedWhenEmpty(t *testing.T) {
-	cloudInit := "#cloud-config\npackages:\n  - git\n"
-	cfg := BuildInstanceConfig(cloudInit, nil, nil, nil)
-
-	if strings.Contains(cfg["user.user-data"], "ssh_authorized_keys") {
-		t.Error("ssh_authorized_keys should not appear when no SSH keys provided")
-	}
-}
-
-func TestBuildInstanceConfig_PrivateKeyWriteFiles(t *testing.T) {
-	cloudInit := "#cloud-config\npackages:\n  - git\n"
-	pem := "-----BEGIN OPENSSH PRIVATE KEY-----\nABCD\n-----END OPENSSH PRIVATE KEY-----\n"
-	cfg := BuildInstanceConfig(cloudInit, nil, []string{pem}, nil)
-
-	userData := cfg["user.user-data"]
-	if !strings.Contains(userData, "write_files") {
-		t.Error("write_files block missing when private key provided")
-	}
-	if !strings.Contains(userData, "plati_key_0") {
-		t.Error("private key file plati_key_0 missing from write_files block")
-	}
-	if !strings.Contains(userData, "/home/ubuntu/.ssh/config") {
-		t.Error("SSH config file missing from write_files block")
-	}
-}
-
 func TestBuildInstanceConfig_Resources(t *testing.T) {
 	resources := map[string]string{"cpu": "2", "memory": "4GB"}
-	cfg := BuildInstanceConfig("", nil, nil, resources)
+	cfg := BuildInstanceConfig(resources)
 
 	if cfg["limits.cpu"] != "2" {
 		t.Errorf("limits.cpu = %q, want %q", cfg["limits.cpu"], "2")
@@ -78,24 +16,6 @@ func TestBuildInstanceConfig_Resources(t *testing.T) {
 	if cfg["limits.memory"] != "4GB" {
 		t.Errorf("limits.memory = %q, want %q", cfg["limits.memory"], "4GB")
 	}
-}
-
-func TestBuildInstanceConfig_HeaderPreservedAfterKeyInjection(t *testing.T) {
-	// Regression: appending ssh_authorized_keys must not displace #cloud-config header.
-	cloudInit := "#cloud-config\npackages:\n  - curl\n"
-	cfg := BuildInstanceConfig(cloudInit, []string{"ssh-rsa AAAA k"}, []string{"-----BEGIN OPENSSH PRIVATE KEY-----\nX\n-----END OPENSSH PRIVATE KEY-----\n"}, nil)
-
-	userData := cfg["user.user-data"]
-	if !strings.HasPrefix(userData, "#cloud-config") {
-		t.Errorf("user.user-data header displaced after key injection; got prefix: %q", userData[:min(len(userData), 50)])
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ── BuildSetupCommands tests ──────────────────────────────────────────────────
@@ -132,22 +52,29 @@ func TestBuildSetupCommands_RootSSHAlways(t *testing.T) {
 }
 
 func TestBuildSetupCommands_TerminalUser(t *testing.T) {
-	cmds := BuildSetupCommands(SetupConfig{
+	steps := BuildSetupSteps(SetupConfig{
 		PublicKeys:   []string{"ssh-ed25519 AAAA k"},
 		TerminalUser: "ubuntu",
 	})
 
-	// Must have commands for /home/ubuntu/.ssh
+	// Must have a "Wait for user ubuntu" step
+	foundWait := false
 	foundDir := false
 	foundChown := false
-	for _, cmd := range cmds {
-		full := strings.Join(cmd, " ")
+	for _, step := range steps {
+		if strings.Contains(step.Label, "Wait for user ubuntu") {
+			foundWait = true
+		}
+		full := strings.Join(step.Cmd, " ")
 		if strings.Contains(full, "/home/ubuntu/.ssh") {
 			foundDir = true
 		}
 		if strings.Contains(full, "chown -R ubuntu:ubuntu") {
 			foundChown = true
 		}
+	}
+	if !foundWait {
+		t.Error("expected 'Wait for user ubuntu' step")
 	}
 	if !foundDir {
 		t.Error("expected /home/ubuntu/.ssh setup commands")

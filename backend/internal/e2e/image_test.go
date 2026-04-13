@@ -1,7 +1,7 @@
 //go:build e2e
 
-// Package e2e contains image-level tests that provision real Incus containers,
-// wait for cloud-init to complete, and verify the resulting environment.
+// Package e2e contains image-level tests that provision real Incus containers
+// and verify the resulting environment.
 //
 // These tests talk directly to a live Incus server — no Plati API layer is
 // involved.  They are intentionally skipped when the required env vars are
@@ -17,7 +17,7 @@
 // # Optional env vars
 //
 //	TAILSCALE_AUTH_KEY  auth key for the tailscale join check
-//	IMAGE_TIMEOUT_SEC   cloud-init wait budget in seconds (default: 300)
+//	IMAGE_TIMEOUT_SEC   readiness wait budget in seconds (default: 300)
 //
 // # Running
 //
@@ -52,10 +52,9 @@ const (
 
 // templateYAML mirrors services.TemplateYAML to avoid a service-layer import.
 type templateYAML struct {
-	Name      string   `yaml:"name"`
-	Image     string   `yaml:"image"`
-	Profiles  []string `yaml:"profiles"`
-	CloudInit string   `yaml:"cloud_init"`
+	Name     string   `yaml:"name"`
+	Image    string   `yaml:"image"`
+	Profiles []string `yaml:"profiles"`
 }
 
 // repoRoot returns the absolute path to the repository root by walking up from
@@ -110,7 +109,7 @@ func envOr(key, def string) string {
 	return def
 }
 
-func cloudInitTimeout() int {
+func readyTimeout() int {
 	if v := os.Getenv("IMAGE_TIMEOUT_SEC"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
@@ -131,9 +130,6 @@ func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAM
 	t.Helper()
 
 	cfg := map[string]string{}
-	if tmpl.CloudInit != "" {
-		cfg["user.user-data"] = tmpl.CloudInit
-	}
 	for k, v := range envVars {
 		cfg["environment."+k] = v
 	}
@@ -163,29 +159,23 @@ func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAM
 	t.Logf("container %s started", name)
 }
 
-// waitCloudInit polls `cloud-init status` until it reports "done" or the
-// timeout elapses.  On cloud-init failure it prints /var/log/cloud-init-output.log
-// before calling t.Fatalf.
-func waitCloudInit(t *testing.T, client *incus.Client, name string) {
+// waitReady waits until the container is responsive by polling a simple command.
+// On /cloud images this effectively waits for cloud-init to finish creating users.
+func waitReady(t *testing.T, client *incus.Client, name string) {
 	t.Helper()
-	timeout := cloudInitTimeout()
+	timeout := readyTimeout()
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	t.Logf("waiting for cloud-init on %s (budget: %ds) …", name, timeout)
+	t.Logf("waiting for %s to be ready (budget: %ds) …", name, timeout)
 
 	for time.Now().Before(deadline) {
-		out, err := client.RunCommand(name, []string{"cloud-init", "status"})
-		switch {
-		case err == nil && strings.Contains(out, "status: done"):
-			t.Logf("cloud-init finished successfully on %s", name)
+		_, err := client.RunCommand(name, []string{"true"})
+		if err == nil {
+			t.Logf("container %s is ready", name)
 			return
-		case strings.Contains(out, "status: error"):
-			log, _ := client.RunCommand(name, []string{"cat", "/var/log/cloud-init-output.log"})
-			t.Fatalf("cloud-init error on %s:\n%s\n\ncloud-init-output.log:\n%s", name, out, log)
 		}
-		// Still running (or container not ready yet) — wait and retry.
 		time.Sleep(5 * time.Second)
 	}
-	t.Fatalf("cloud-init timed out after %d seconds on %s", timeout, name)
+	t.Fatalf("container %s not ready after %d seconds", name, timeout)
 }
 
 // run executes a command inside the container and returns trimmed stdout.
@@ -223,7 +213,7 @@ func TestImage_Tailscale(t *testing.T) {
 	}
 
 	provision(t, client, name, tmpl, envVars)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	// tailscaled service must be active (systemctl is-active exits 0 when active).
 	run(t, client, name, "systemctl", "is-active", "tailscaled")
@@ -249,7 +239,7 @@ func TestImage_SSHX(t *testing.T) {
 	name := containerName("sshx")
 
 	provision(t, client, name, tmpl, nil)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	// sshx systemd service must be active.
 	run(t, client, name, "systemctl", "is-active", "sshx")
@@ -283,7 +273,7 @@ func TestImage_NodeDev(t *testing.T) {
 	name := containerName("node-dev")
 
 	provision(t, client, name, tmpl, nil)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	ver := runContains(t, client, name, "v", "node", "--version")
 	t.Logf("node: %s", ver)
@@ -303,7 +293,7 @@ func TestImage_PythonDev(t *testing.T) {
 	name := containerName("python-dev")
 
 	provision(t, client, name, tmpl, nil)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	ver := runContains(t, client, name, "Python 3", "python", "--version")
 	t.Logf("python: %s", ver)
@@ -320,7 +310,7 @@ func TestImage_SiteCA(t *testing.T) {
 	name := containerName("site-ca")
 
 	provision(t, client, name, tmpl, nil)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	// Node.js is installed.
 	nodeVer := runContains(t, client, name, "v", "node", "--version")
@@ -408,39 +398,21 @@ func bridgeProxyHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── Docker-in-Docker ──────────────────────────────────────────────────────────
 
-// injectProxyIntoCloudInit adds write_files entries that configure apt,
-// curl (via /root/.curlrc), and the Docker daemon to use proxyURL.
-// If a write_files section already exists it appends to it; otherwise
-// a new section is inserted after the #cloud-config header.
-func injectProxyIntoCloudInit(cloudInit, proxyURL string) string {
-	proxyItems := fmt.Sprintf(
-		"  - path: /etc/apt/apt.conf.d/99proxy\n"+
-			"    content: |\n"+
-			"      Acquire::http::Proxy \"%s\";\n"+
-			"      Acquire::https::Proxy \"%s\";\n"+
-			"  - path: /root/.curlrc\n"+
-			"    content: |\n"+
-			"      proxy = %s\n"+
-			"      noproxy = localhost,127.0.0.1\n"+
-			"  - path: /etc/systemd/system/docker.service.d/proxy.conf\n"+
-			"    permissions: '0644'\n"+
-			"    content: |\n"+
-			"      [Service]\n"+
-			"      Environment=\"HTTP_PROXY=%s\"\n"+
-			"      Environment=\"HTTPS_PROXY=%s\"\n"+
-			"      Environment=\"NO_PROXY=localhost,127.0.0.1\"\n",
-		proxyURL, proxyURL, proxyURL, proxyURL, proxyURL,
-	)
-
-	const marker = "\nwrite_files:\n"
-	if idx := strings.Index(cloudInit, marker); idx >= 0 {
-		// Append our items to the existing write_files section.
-		insertAt := idx + len(marker)
-		return cloudInit[:insertAt] + proxyItems + cloudInit[insertAt:]
+// injectProxyViaExec configures apt, curl, and Docker proxy settings via exec
+// commands after the container has started.
+func injectProxyViaExec(t *testing.T, client *incus.Client, name, proxyURL string) {
+	t.Helper()
+	cmds := []struct{ desc, cmd string }{
+		{"apt proxy", fmt.Sprintf(`printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' > /etc/apt/apt.conf.d/99proxy`, proxyURL, proxyURL)},
+		{"curl proxy", fmt.Sprintf(`printf 'proxy = %s\nnoproxy = localhost,127.0.0.1\n' > /root/.curlrc`, proxyURL)},
+		{"docker proxy dir", "mkdir -p /etc/systemd/system/docker.service.d"},
+		{"docker proxy", fmt.Sprintf(`printf '[Service]\nEnvironment="HTTP_PROXY=%s"\nEnvironment="HTTPS_PROXY=%s"\nEnvironment="NO_PROXY=localhost,127.0.0.1"\n' > /etc/systemd/system/docker.service.d/proxy.conf`, proxyURL, proxyURL)},
 	}
-	// No existing write_files; create one after #cloud-config.
-	return strings.Replace(cloudInit, "#cloud-config\n",
-		"#cloud-config\nwrite_files:\n"+proxyItems, 1)
+	for _, c := range cmds {
+		if _, err := client.RunCommand(name, []string{"/bin/sh", "-c", c.cmd}); err != nil {
+			t.Logf("proxy setup (%s): %v", c.desc, err)
+		}
+	}
 }
 
 func TestImage_DockerDev(t *testing.T) {
@@ -448,14 +420,14 @@ func TestImage_DockerDev(t *testing.T) {
 	tmpl := loadTemplate(t, "docker-dev")
 	name := containerName("docker-dev")
 
+	provision(t, client, name, tmpl, nil)
+	waitReady(t, client, name)
+
 	// Start a local proxy so the container can reach the internet even when
 	// the host's nftables FORWARD chain blocks direct container egress.
 	if proxyURL := startBridgeProxy(t); proxyURL != "" {
-		tmpl.CloudInit = injectProxyIntoCloudInit(tmpl.CloudInit, proxyURL)
+		injectProxyViaExec(t, client, name, proxyURL)
 	}
-
-	provision(t, client, name, tmpl, nil)
-	waitCloudInit(t, client, name)
 
 	// Docker daemon must be active.
 	run(t, client, name, "systemctl", "is-active", "docker")
@@ -494,7 +466,7 @@ func TestImage_SimpleWebServer(t *testing.T) {
 	}
 
 	provision(t, client, name, tmpl, envVars)
-	waitCloudInit(t, client, name)
+	waitReady(t, client, name)
 
 	// webserver.service must be active.
 	run(t, client, name, "systemctl", "is-active", "webserver")

@@ -3,35 +3,53 @@
   import { users } from '$lib/api';
   import { addNotification } from '$lib/stores/notifications';
 
-  let keys: UserSSHKey[] = $state([]);
-  let newName = $state('');
-  let loading = $state(false);
-  let generated: GeneratedKeyResult | null = $state(null);
+  // Machine keys (Plati-generated keypairs — injected into instances for git access)
+  let machineKeys: UserSSHKey[] = $state([]);
+  let newMachineKeyName = $state('');
+  let machineKeyLoading = $state(false);
+  let generatedKey: GeneratedKeyResult | null = $state(null);
 
+  // Access keys (user-provided public keys — for SSH login from laptop)
   let accessKeys: SSHKey[] = $state([]);
   let newAccessKeyName = $state('');
   let newAccessKeyValue = $state('');
-  let accessLoading = $state(false);
+  let accessKeyLoading = $state(false);
 
-  async function load() {
-    try {
-      keys = await users.listUserKeys();
-    } catch (e: any) {
-      addNotification('error', e.message);
-    }
+  async function loadMachineKeys() {
+    try { machineKeys = await users.listUserKeys(); }
+    catch (e: any) { addNotification('error', e.message); }
   }
 
   async function loadAccessKeys() {
+    try { accessKeys = await users.listSSHKeys(); }
+    catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function generateMachineKey() {
+    if (!newMachineKeyName.trim()) return;
+    machineKeyLoading = true;
     try {
-      accessKeys = await users.listSSHKeys();
+      generatedKey = await users.generateUserKey(newMachineKeyName.trim());
+      newMachineKeyName = '';
+      await loadMachineKeys();
     } catch (e: any) {
       addNotification('error', e.message);
+    } finally {
+      machineKeyLoading = false;
     }
+  }
+
+  async function deleteMachineKey(id: number) {
+    try {
+      await users.deleteUserKey(id);
+      await loadMachineKeys();
+      addNotification('success', 'Key removed');
+    } catch (e: any) { addNotification('error', e.message); }
   }
 
   async function addAccessKey() {
     if (!newAccessKeyName.trim() || !newAccessKeyValue.trim()) return;
-    accessLoading = true;
+    accessKeyLoading = true;
     try {
       await users.createSSHKey(newAccessKeyName.trim(), newAccessKeyValue.trim());
       newAccessKeyName = '';
@@ -41,7 +59,7 @@
     } catch (e: any) {
       addNotification('error', e.message);
     } finally {
-      accessLoading = false;
+      accessKeyLoading = false;
     }
   }
 
@@ -50,33 +68,7 @@
       await users.deleteSSHKey(id);
       await loadAccessKeys();
       addNotification('success', 'Access key removed');
-    } catch (e: any) {
-      addNotification('error', e.message);
-    }
-  }
-
-  async function generate() {
-    if (!newName.trim()) return;
-    loading = true;
-    try {
-      generated = await users.generateUserKey(newName.trim());
-      newName = '';
-      await load();
-    } catch (e: any) {
-      addNotification('error', e.message);
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function remove(id: number) {
-    try {
-      await users.deleteUserKey(id);
-      await load();
-      addNotification('success', 'Key removed');
-    } catch (e: any) {
-      addNotification('error', e.message);
-    }
+    } catch (e: any) { addNotification('error', e.message); }
   }
 
   function copy(text: string, label: string) {
@@ -84,151 +76,253 @@
     addNotification('success', `${label} copied`);
   }
 
-  load();
+  loadMachineKeys();
   loadAccessKeys();
 </script>
 
-<div>
-  <h3 class="text-lg font-semibold mb-1">SSH Keys</h3>
-  <p class="text-sm text-gray-500 mb-4">
-    Plati generates an SSH keypair for you. Add the <strong>public key</strong> to your
-    <a href="https://github.com/settings/keys" target="_blank" class="text-primary hover:underline">GitHub account</a>
-    (or any git host). The private key is automatically injected into your instances so
-    <code class="bg-gray-100 px-1 rounded">git</code> works out of the box.
-  </p>
+<!-- ─── Access Keys ──────────────────────────────────────────── -->
+<div class="card-static p-6">
 
-  <div class="space-y-3 mb-6">
-    {#each keys as key}
-      <div class="p-3 bg-gray-50 rounded border">
-        <div class="flex justify-between items-start">
-          <div class="min-w-0 flex-1">
-            <span class="font-medium">{key.name}</span>
-            <span class="text-xs text-gray-400 ml-2">
-              {new Date(key.created_at).toLocaleDateString()}
-            </span>
-          </div>
-          <button onclick={() => remove(key.id)} class="text-red-600 hover:text-red-800 text-sm ml-4 shrink-0">Remove</button>
+  <div class="flex items-start gap-3 mb-5">
+    <div class="bg-primary-50 rounded-xl p-2.5 shrink-0">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+      </svg>
+    </div>
+    <div>
+      <h3 class="text-base font-bold text-gray-900">Access Keys</h3>
+      <p class="text-sm text-gray-500 leading-relaxed">Your laptop's public key — lets you SSH into your instances from your machine.</p>
+    </div>
+  </div>
+
+  <!-- Diagram -->
+  <div class="rounded-xl bg-gray-50 border border-gray-200 p-4 mb-6 flex items-center justify-between gap-3 text-sm">
+    <!-- Laptop -->
+    <div class="flex flex-col items-center gap-1.5 flex-1">
+      <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5 flex flex-col items-center gap-1 w-full">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+        </svg>
+        <span class="font-mono text-xs text-gray-500">~/.ssh/id_rsa</span>
+      </div>
+      <span class="text-xs text-gray-400 font-medium">Your laptop</span>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flex flex-col items-center gap-0.5 shrink-0">
+      <div class="flex items-center gap-1 text-primary font-semibold text-xs">
+        <div class="w-6 h-px bg-primary"></div>
+        <span>SSH</span>
+        <div class="w-6 h-px bg-primary"></div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+      <span class="text-xs text-gray-400">port 22</span>
+    </div>
+
+    <!-- Instance -->
+    <div class="flex flex-col items-center gap-1.5 flex-1">
+      <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5 flex flex-col items-center gap-1 w-full">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+        </svg>
+        <span class="font-mono text-xs text-gray-500">authorized_keys</span>
+      </div>
+      <span class="text-xs text-gray-400 font-medium">Your instance</span>
+    </div>
+  </div>
+  <p class="text-xs text-gray-400 -mt-4 mb-5 text-center">Your laptop's <strong class="text-gray-500">private key</strong> stays on your machine. Paste the <strong class="text-gray-500">public key</strong> below.</p>
+
+  <!-- Key list -->
+  <div class="space-y-2 mb-5">
+    {#each accessKeys as key}
+      <div class="flex justify-between items-center px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="min-w-0 flex-1">
+          <span class="text-sm font-medium text-gray-800">{key.name}</span>
+          <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+          <p class="font-mono text-xs text-gray-400 truncate mt-0.5">{key.public_key.substring(0, 52)}…</p>
         </div>
-        <div class="flex items-center gap-2 mt-2">
-          <code class="text-xs text-gray-500 font-mono truncate flex-1">{key.public_key.substring(0, 60)}…</code>
-          <button
-            onclick={() => copy(key.public_key, 'Public key')}
-            class="text-xs text-primary hover:text-primary-dark shrink-0 border border-primary/20 rounded px-2 py-0.5"
-          >
-            Copy public key
-          </button>
-        </div>
+        <button onclick={() => removeAccessKey(key.id)} class="btn-danger btn-sm ml-3 shrink-0">Remove</button>
       </div>
     {/each}
-    {#if keys.length === 0}
-      <p class="text-gray-500 text-sm">No keys generated yet.</p>
+    {#if accessKeys.length === 0}
+      <p class="text-sm text-gray-400 py-2">No access keys added yet.</p>
     {/if}
   </div>
 
-  <div class="border-t pt-4 flex gap-3">
+  <!-- Add form -->
+  <div class="border-t border-gray-100 pt-4 space-y-2">
+    <p class="text-xs font-medium text-gray-500 mb-2">Add a public key</p>
     <input
-      bind:value={newName}
-      placeholder="Key name (e.g. work laptop)"
-      class="flex-1 px-3 py-2 border rounded text-sm"
-      onkeydown={(e) => e.key === 'Enter' && generate()}
+      bind:value={newAccessKeyName}
+      placeholder="Name (e.g. Work laptop)"
+      class="input w-full text-sm"
     />
+    <textarea
+      bind:value={newAccessKeyValue}
+      placeholder="Paste public key — ssh-ed25519 AAAA… or ssh-rsa AAAA…"
+      rows="2"
+      class="input w-full font-mono text-xs resize-none"
+    ></textarea>
     <button
-      onclick={generate}
-      disabled={loading || !newName.trim()}
-      class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap"
+      onclick={addAccessKey}
+      disabled={accessKeyLoading || !newAccessKeyName.trim() || !newAccessKeyValue.trim()}
+      class="btn-primary btn-sm"
     >
-      Generate Key
+      {accessKeyLoading ? 'Adding…' : 'Add Key'}
     </button>
   </div>
 </div>
 
-<!-- Access Keys section -->
-<div class="mt-8">
-  <h3 class="text-lg font-semibold mb-1">Access Keys</h3>
-  <p class="text-sm text-gray-500 mb-4">
-    Paste your laptop's public key here (e.g. <code class="bg-gray-100 px-1 rounded">~/.ssh/id_rsa.pub</code>).
-    It will be added to <code class="bg-gray-100 px-1 rounded">authorized_keys</code> on all your instances,
-    allowing you to SSH in directly.
-  </p>
+<!-- ─── Machine Keys ─────────────────────────────────────────── -->
+<div class="card-static p-6">
 
-  <div class="space-y-3 mb-6">
-    {#each accessKeys as key}
-      <div class="p-3 bg-gray-50 rounded border">
-        <div class="flex justify-between items-start">
-          <div class="min-w-0 flex-1">
-            <span class="font-medium">{key.name}</span>
-            <span class="text-xs text-gray-400 ml-2">
-              {new Date(key.created_at).toLocaleDateString()}
-            </span>
-          </div>
-          <button onclick={() => removeAccessKey(key.id)} class="text-red-600 hover:text-red-800 text-sm ml-4 shrink-0">Remove</button>
+  <div class="flex items-start gap-3 mb-5">
+    <div class="bg-secondary-50 rounded-xl p-2.5 shrink-0">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6M15.5 7.5 19 4M13 10l-2 2"/>
+      </svg>
+    </div>
+    <div>
+      <h3 class="text-base font-bold text-gray-900">Machine Keys</h3>
+      <p class="text-sm text-gray-500 leading-relaxed">A keypair injected into your instances so they can clone and push to git repositories.</p>
+    </div>
+  </div>
+
+  <!-- Diagram -->
+  <div class="rounded-xl bg-gray-50 border border-gray-200 p-4 mb-6 flex items-center justify-between gap-3 text-sm">
+    <!-- Instance -->
+    <div class="flex flex-col items-center gap-1.5 flex-1">
+      <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5 flex flex-col items-center gap-1 w-full">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+        </svg>
+        <span class="font-mono text-xs text-gray-500">~/.ssh/id_rsa</span>
+      </div>
+      <span class="text-xs text-gray-400 font-medium">Your instance</span>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flex flex-col items-center gap-0.5 shrink-0">
+      <div class="flex items-center gap-1 text-secondary font-semibold text-xs">
+        <div class="w-6 h-px bg-secondary"></div>
+        <span>git</span>
+        <div class="w-6 h-px bg-secondary"></div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+      <span class="text-xs text-gray-400">SSH</span>
+    </div>
+
+    <!-- GitHub -->
+    <div class="flex flex-col items-center gap-1.5 flex-1">
+      <div class="bg-white border border-gray-200 rounded-lg px-3 py-2.5 flex flex-col items-center gap-1 w-full">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+        </svg>
+        <span class="font-mono text-xs text-gray-500">Deploy keys</span>
+      </div>
+      <span class="text-xs text-gray-400 font-medium">GitHub / repo</span>
+    </div>
+  </div>
+  <p class="text-xs text-gray-400 -mt-4 mb-5 text-center">The <strong class="text-gray-500">private key</strong> is auto-injected into your instance. Add the <strong class="text-gray-500">public key</strong> to your repo as a deploy key.</p>
+
+  <!-- Key list -->
+  <div class="space-y-2 mb-5">
+    {#each machineKeys as key}
+      <div class="flex justify-between items-center px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-200">
+        <div class="min-w-0 flex-1">
+          <span class="text-sm font-medium text-gray-800">{key.name}</span>
+          <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+          <p class="font-mono text-xs text-gray-400 truncate mt-0.5">{key.public_key.substring(0, 52)}…</p>
         </div>
-        <code class="text-xs text-gray-500 font-mono truncate block mt-2">{key.public_key.substring(0, 60)}…</code>
+        <div class="flex items-center gap-2 ml-3 shrink-0">
+          <button
+            onclick={() => copy(key.public_key, 'Public key')}
+            class="btn-outline btn-sm"
+          >Copy public key</button>
+          <button onclick={() => deleteMachineKey(key.id)} class="btn-danger btn-sm">Remove</button>
+        </div>
       </div>
     {/each}
-    {#if accessKeys.length === 0}
-      <p class="text-gray-500 text-sm">No access keys added yet.</p>
+    {#if machineKeys.length === 0}
+      <p class="text-sm text-gray-400 py-2">No machine keys generated yet.</p>
     {/if}
   </div>
 
-  <div class="border-t pt-4 space-y-3">
-    <input
-      bind:value={newAccessKeyName}
-      placeholder="Key name (e.g. work laptop)"
-      class="w-full px-3 py-2 border rounded text-sm"
-    />
-    <textarea
-      bind:value={newAccessKeyValue}
-      placeholder="Paste public key (ssh-rsa AAAA... or ssh-ed25519 AAAA...)"
-      rows="3"
-      class="w-full px-3 py-2 border rounded font-mono text-xs"
-    ></textarea>
-    <button
-      onclick={addAccessKey}
-      disabled={accessLoading || !newAccessKeyName.trim() || !newAccessKeyValue.trim()}
-      class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm"
-    >
-      Add Access Key
-    </button>
+  <!-- Generate form -->
+  <div class="border-t border-gray-100 pt-4">
+    <p class="text-xs font-medium text-gray-500 mb-2">Generate a new keypair</p>
+    <div class="flex gap-2">
+      <input
+        bind:value={newMachineKeyName}
+        placeholder="Name (e.g. work)"
+        class="input flex-1 text-sm"
+        onkeydown={(e) => e.key === 'Enter' && generateMachineKey()}
+      />
+      <button
+        onclick={generateMachineKey}
+        disabled={machineKeyLoading || !newMachineKeyName.trim()}
+        class="btn-primary btn-sm whitespace-nowrap"
+      >
+        {machineKeyLoading ? 'Generating…' : 'Generate Key'}
+      </button>
+    </div>
   </div>
 </div>
 
 <!-- One-time key reveal modal -->
-{#if generated}
+{#if generatedKey}
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
       <div class="p-6">
-        <h2 class="text-lg font-bold mb-1">Key generated: {generated.name}</h2>
-        <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-          Save your private key now — it won't be shown again. If you lose it, generate a new key.
-        </p>
-
-        <div class="space-y-4">
-          <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="text-sm font-medium text-gray-700">Public key</label>
-              <button onclick={() => copy(generated!.public_key, 'Public key')} class="text-xs text-primary hover:underline">Copy</button>
-            </div>
-            <p class="text-xs text-gray-500 mb-1">Add this to your GitHub account settings.</p>
-            <textarea readonly rows="2" class="w-full px-3 py-2 border rounded font-mono text-xs bg-gray-50">{generated.public_key}</textarea>
+        <div class="flex items-start gap-3 mb-4">
+          <div class="bg-secondary-50 rounded-xl p-2.5 shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6M15.5 7.5 19 4M13 10l-2 2"/>
+            </svg>
           </div>
-
           <div>
-            <div class="flex justify-between items-center mb-1">
-              <label class="text-sm font-medium text-gray-700">Private key</label>
-              <button onclick={() => copy(generated!.private_key, 'Private key')} class="text-xs text-primary hover:underline">Copy</button>
-            </div>
-            <p class="text-xs text-gray-500 mb-1">
-              Save as <code class="bg-gray-100 px-1 rounded">~/.ssh/plati_key</code> on your laptop to SSH into instances.
-            </p>
-            <textarea readonly rows="6" class="w-full px-3 py-2 border rounded font-mono text-xs bg-gray-50">{generated.private_key}</textarea>
+            <h2 class="text-base font-bold text-gray-900">Key generated — {generatedKey.name}</h2>
+            <p class="text-sm text-gray-500">Two halves, two destinations.</p>
           </div>
         </div>
 
-        <div class="flex justify-end mt-6 pt-4 border-t">
-          <button onclick={() => generated = null} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">
-            Done
-          </button>
+        <div class="rounded-xl bg-amber-50 border border-amber-200 p-3 mb-5 text-xs text-amber-700 leading-relaxed">
+          Save the private key now if you need a local backup — it won't be shown again.
+          In normal use you don't need it: Plati injects it into your instances automatically.
+        </div>
+
+        <div class="space-y-4">
+          <!-- Public key -->
+          <div class="rounded-xl border border-gray-200 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2.5 bg-primary-50 border-b border-gray-200">
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+                </svg>
+                <span class="text-xs font-semibold text-primary">Public key → GitHub / repo deploy keys</span>
+              </div>
+              <button onclick={() => copy(generatedKey!.public_key, 'Public key')} class="text-xs text-primary hover:text-primary-dark font-medium">Copy</button>
+            </div>
+            <textarea readonly rows="2" class="w-full px-4 py-3 font-mono text-xs bg-white text-gray-600 resize-none outline-none">{generatedKey.public_key}</textarea>
+          </div>
+
+          <!-- Private key -->
+          <div class="rounded-xl border border-gray-200 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>
+                </svg>
+                <span class="text-xs font-semibold text-gray-600">Private key → auto-injected into your instances by Plati</span>
+              </div>
+              <button onclick={() => copy(generatedKey!.private_key, 'Private key')} class="text-xs text-gray-500 hover:text-gray-700 font-medium">Copy</button>
+            </div>
+            <textarea readonly rows="5" class="w-full px-4 py-3 font-mono text-xs bg-white text-gray-600 resize-none outline-none">{generatedKey.private_key}</textarea>
+          </div>
+        </div>
+
+        <div class="flex justify-end mt-5 pt-4 border-t border-gray-100">
+          <button onclick={() => generatedKey = null} class="btn-primary">Done</button>
         </div>
       </div>
     </div>

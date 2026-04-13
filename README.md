@@ -119,7 +119,7 @@ config/
 ```
 Select template → Validate → Select server (first-fit)
   → Create storage volume (/workspace)
-  → Create Incus instance (image + cloud-init)
+  → Create Incus instance (image + profiles + limits)
   → Attach volume
   → Start instance → SSH connection info
 ```

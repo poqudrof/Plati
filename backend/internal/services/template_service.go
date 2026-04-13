@@ -103,7 +103,6 @@ type TemplateYAML struct {
 	Image              string               `yaml:"image"`
 	Profiles           []string             `yaml:"profiles"`
 	Resources          map[string]any       `yaml:"resources"`
-	CloudInit          string               `yaml:"cloud_init"`
 	TerminalUser       string               `yaml:"terminal_user,omitempty"`
 	Includes           []string             `yaml:"includes,omitempty"`
 	PostCreateCommands []string             `yaml:"post_create_commands,omitempty"` // deprecated
@@ -189,6 +188,22 @@ func (s *TemplateService) SaveToDisk(id int64) error {
 		return fmt.Errorf("export yaml: %w", err)
 	}
 	return os.WriteFile(filepath.Join(s.templatesDir, t.Slug+".yaml"), yamlBytes, 0644)
+}
+
+// ReloadFromDisk reads the template's YAML file from disk and updates the DB record.
+func (s *TemplateService) ReloadFromDisk(id int64) (*models.Template, error) {
+	if s.templatesDir == "" {
+		return nil, fmt.Errorf("templates directory not configured")
+	}
+	t, err := queries.GetTemplate(s.db, id)
+	if err != nil {
+		return nil, fmt.Errorf("get template: %w", err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.templatesDir, t.Slug+".yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("read yaml file: %w", err)
+	}
+	return s.UpdateFromYAML(id, data)
 }
 
 // GetMixinFileSteps returns PushFile setup steps for all files declared in the given mixin names.
@@ -394,7 +409,6 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		Image:              ty.Image,
 		Profiles:           string(profiles),
 		Resources:          string(resources),
-		CloudInit:          ty.CloudInit,
 		TerminalUser:       ty.TerminalUser,
 		PostCreateCommands: string(postCmds),
 		PersistenceMode:    persistenceMode,
@@ -458,7 +472,6 @@ func (s *TemplateService) ExportYAML(id int64) ([]byte, error) {
 		Image:             t.Image,
 		Profiles:          profiles,
 		Resources:         resources,
-		CloudInit:         t.CloudInit,
 		TerminalUser:      t.TerminalUser,
 		Includes:          includes,
 		FirstInitCommands: firstInitCmds,

@@ -100,7 +100,6 @@ type Template struct {
 	Image              string    `db:"image" json:"image"`
 	Profiles           string    `db:"profiles" json:"profiles"`   // JSON array
 	Resources          string    `db:"resources" json:"resources"` // JSON object
-	CloudInit          string    `db:"cloud_init" json:"cloud_init"`
 	TerminalUser       string    `db:"terminal_user" json:"terminal_user"`               // non-root login user; empty = root only
 	PostCreateCommands string    `db:"post_create_commands" json:"post_create_commands"` // JSON array (deprecated)
 	PersistenceMode    string    `db:"persistence_mode"    json:"persistence_mode"`      // "normal" | "ephemeral"

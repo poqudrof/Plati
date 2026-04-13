@@ -61,94 +61,152 @@
 </script>
 
 <div class="space-y-8">
-  <h1 class="text-2xl font-bold">Settings</h1>
+  <h1 class="text-2xl font-extrabold tracking-tight text-gray-900">Settings</h1>
 
-  <!-- Instance Preferences -->
-  {#if prefs}
-  <div class="bg-white rounded-lg border p-6">
-    <h3 class="text-lg font-semibold mb-1">Instance Preferences</h3>
-    <p class="text-sm text-gray-500 mb-4">These defaults apply when creating new instances. You can override them per-instance in the Advanced section.</p>
-
-    <div class="space-y-6">
-      <!-- SSH Key Mode -->
-      <div>
-        <p class="text-sm font-medium text-gray-700 mb-2">SSH Key Mode</p>
-        <div class="space-y-2">
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="radio" bind:group={prefs.ssh_key_mode} value="plati" class="mt-1" />
-            <div>
-              <span class="font-medium">Plati (recommended)</span>
-              <p class="text-xs text-gray-500">The admin-managed key assigned to you is injected into each instance, enabling git/SSH operations automatically (e.g. access to org repos).</p>
-            </div>
-          </label>
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="radio" bind:group={prefs.ssh_key_mode} value="personal" class="mt-1" />
-            <div>
-              <span class="font-medium">Personal</span>
-              <p class="text-xs text-gray-500">Your personal SSH key (generated below) is injected into each instance. Use this if you want to authenticate with your own GitHub account.</p>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      <!-- Tailscale Mode -->
-      <div>
-        <p class="text-sm font-medium text-gray-700 mb-2">Tailscale Auth Key</p>
-        <div class="space-y-2">
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="radio" bind:group={prefs.tailscale_mode} value="plati" class="mt-1" />
-            <div>
-              <span class="font-medium">Platform key</span>
-              <p class="text-xs text-gray-500">Use the platform-level Tailscale auth key configured by your admin. Requires admin to configure the platform key.</p>
-            </div>
-          </label>
-          <label class="flex items-start gap-3 cursor-pointer">
-            <input type="radio" bind:group={prefs.tailscale_mode} value="personal" class="mt-1" />
-            <div>
-              <span class="font-medium">Personal key</span>
-              <p class="text-xs text-gray-500">Use your own <code class="bg-gray-100 px-1 rounded">TAILSCALE_AUTH_KEY</code> secret. Add it in Global Secrets below.</p>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      <button
-        onclick={savePrefs}
-        disabled={savingPrefs}
-        class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50"
-      >
-        {savingPrefs ? 'Saving...' : 'Save Preferences'}
-      </button>
+  <!-- ─── SSH Keys ──────────────────────────────────────────── -->
+  <section class="space-y-4">
+    <div>
+      <h2 class="text-lg font-bold text-gray-900">SSH Keys</h2>
+      <p class="text-sm text-gray-500 leading-relaxed mt-0.5">
+        Two separate key flows — one for logging into your instances, one for your instances to access git repos.
+      </p>
     </div>
-  </div>
+
+    <SSHKeyManager />
+  </section>
+
+  <!-- ─── Machine Key Mode ──────────────────────────────────── -->
+  {#if prefs}
+  <section>
+    <div class="card-static p-6 space-y-5">
+      <div class="flex items-start gap-3">
+        <div class="bg-primary-50 rounded-xl p-2.5 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Machine Key Mode</h2>
+          <p class="text-sm text-gray-500 leading-relaxed">Which private key gets injected into your instances for git access.</p>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <!-- Plati mode -->
+        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
+          {prefs.ssh_key_mode === 'plati'
+            ? 'border-primary bg-primary-50'
+            : 'border-gray-200 bg-white hover:border-gray-300'}">
+          <input type="radio" bind:group={prefs.ssh_key_mode} value="plati" class="mt-0.5 accent-primary" />
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-sm font-semibold text-gray-900">Admin-managed key</span>
+              <span class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary font-medium border border-primary/20">Recommended</span>
+            </div>
+            <p class="text-xs text-gray-500 leading-relaxed">
+              The key your admin assigned to you is injected into every instance.
+              Gives automatic access to org repos — no setup needed.
+            </p>
+          </div>
+        </label>
+
+        <!-- Personal mode -->
+        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
+          {prefs.ssh_key_mode === 'personal'
+            ? 'border-primary bg-primary-50'
+            : 'border-gray-200 bg-white hover:border-gray-300'}">
+          <input type="radio" bind:group={prefs.ssh_key_mode} value="personal" class="mt-0.5 accent-primary" />
+          <div class="min-w-0">
+            <span class="text-sm font-semibold text-gray-900">My machine key</span>
+            <p class="text-xs text-gray-500 leading-relaxed mt-0.5">
+              Your personal machine key (generated above) is injected instead.
+              Use this when you want instances to authenticate as your own GitHub account.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <!-- Tailscale mode -->
+      <div class="border-t border-gray-100 pt-5 space-y-3">
+        <div>
+          <p class="text-sm font-semibold text-gray-900 mb-0.5">Tailscale Auth Key</p>
+          <p class="text-xs text-gray-500">Which Tailscale key is injected when your instances join the tailnet.</p>
+        </div>
+
+        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
+          {prefs.tailscale_mode === 'plati'
+            ? 'border-primary bg-primary-50'
+            : 'border-gray-200 bg-white hover:border-gray-300'}">
+          <input type="radio" bind:group={prefs.tailscale_mode} value="plati" class="mt-0.5 accent-primary" />
+          <div>
+            <span class="text-sm font-semibold text-gray-900">Platform key</span>
+            <p class="text-xs text-gray-500 leading-relaxed mt-0.5">Use the platform-level Tailscale auth key configured by your admin.</p>
+          </div>
+        </label>
+
+        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
+          {prefs.tailscale_mode === 'personal'
+            ? 'border-primary bg-primary-50'
+            : 'border-gray-200 bg-white hover:border-gray-300'}">
+          <input type="radio" bind:group={prefs.tailscale_mode} value="personal" class="mt-0.5 accent-primary" />
+          <div>
+            <span class="text-sm font-semibold text-gray-900">Personal key</span>
+            <p class="text-xs text-gray-500 leading-relaxed mt-0.5">
+              Use your own <code class="bg-gray-100 px-1 rounded font-mono">TAILSCALE_AUTH_KEY</code> secret from Global Secrets below.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div class="border-t border-gray-100 pt-4">
+        <button
+          onclick={savePrefs}
+          disabled={savingPrefs}
+          class="btn-primary"
+        >
+          {savingPrefs ? 'Saving…' : 'Save Preferences'}
+        </button>
+      </div>
+    </div>
+  </section>
   {/if}
 
-  <div class="bg-white rounded-lg border p-6">
-    <SSHKeyManager />
-  </div>
-
-  <div class="bg-white rounded-lg border p-6">
-    <h3 class="text-lg font-semibold mb-4">Global Environment Secrets</h3>
-    <p class="text-sm text-gray-500 mb-4">These secrets are encrypted and automatically injected into <strong>all</strong> your instances as environment variables. Per-instance secrets can be configured on each instance's page.</p>
-
-    <div class="space-y-3 mb-6">
-      {#each secrets as secret}
-        <div class="flex justify-between items-center p-3 bg-gray-50 rounded">
-          <span class="font-medium">{secret.name}</span>
-          <button onclick={() => removeSecret(secret.id)} class="text-red-600 hover:text-red-800 text-sm">Remove</button>
+  <!-- ─── Global Secrets ────────────────────────────────────── -->
+  <section>
+    <div class="card-static p-6">
+      <div class="flex items-start gap-3 mb-5">
+        <div class="bg-secondary-50 rounded-xl p-2.5 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
         </div>
-      {/each}
-      {#if secrets.length === 0}
-        <p class="text-gray-500 text-sm">No secrets configured.</p>
-      {/if}
-    </div>
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Global Environment Secrets</h2>
+          <p class="text-sm text-gray-500 leading-relaxed mt-0.5">
+            Encrypted secrets injected as environment variables into <strong>all</strong> your instances.
+            Per-instance secrets can be set on each instance's page.
+          </p>
+        </div>
+      </div>
 
-    <div class="border-t pt-4 space-y-3">
-      <input bind:value={newSecretName} placeholder="SECRET_NAME" class="w-full px-3 py-2 border rounded" />
-      <input bind:value={newSecretValue} type="password" placeholder="Secret value" class="w-full px-3 py-2 border rounded" />
-      <button onclick={addSecret} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">
-        Add Secret
-      </button>
+      <div class="space-y-2 mb-5">
+        {#each secrets as secret}
+          <div class="flex justify-between items-center px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-200">
+            <span class="text-sm font-medium font-mono text-gray-700">{secret.name}</span>
+            <button onclick={() => removeSecret(secret.id)} class="btn-danger btn-sm">Remove</button>
+          </div>
+        {/each}
+        {#if secrets.length === 0}
+          <p class="text-sm text-gray-400 py-2">No secrets configured.</p>
+        {/if}
+      </div>
+
+      <div class="border-t border-gray-100 pt-4 space-y-2">
+        <p class="text-xs font-medium text-gray-500 mb-2">Add a secret</p>
+        <input bind:value={newSecretName} placeholder="SECRET_NAME" class="input w-full font-mono text-sm" />
+        <input bind:value={newSecretValue} type="password" placeholder="Secret value" class="input w-full text-sm" />
+        <button onclick={addSecret} class="btn-primary btn-sm">Add Secret</button>
+      </div>
     </div>
-  </div>
+  </section>
 </div>

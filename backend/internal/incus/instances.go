@@ -53,12 +53,11 @@ func BuildSetupSteps(cfg SetupConfig) []SetupStep {
 	steps = append(steps, buildSSHSetupSteps("/root/.ssh", cfg.PublicKeys, cfg.PrivateKeyPEMs, "")...)
 
 	if cfg.TerminalUser != "" {
-		// Wait for cloud-init to finish so the terminal_user (e.g. "ubuntu") exists
-		// before we mkdir/chown their .ssh dir. Without this, chown silently fails
-		// and authorized_keys ends up owned by root, blocking SSH logins.
+		// Wait for the terminal_user to exist (created by cloud-init on /cloud
+		// images, or pre-existing in the image). Retries for up to 60s.
 		steps = append(steps, SetupStep{
-			Label: "Wait for cloud-init",
-			Cmd:   []string{"/bin/sh", "-c", "cloud-init status --wait 2>/dev/null || true"},
+			Label: fmt.Sprintf("Wait for user %s", cfg.TerminalUser),
+			Cmd:   []string{"/bin/sh", "-c", fmt.Sprintf("for i in $(seq 1 60); do id %s >/dev/null 2>&1 && break; sleep 1; done", cfg.TerminalUser)},
 		})
 		dir := fmt.Sprintf("/home/%s/.ssh", cfg.TerminalUser)
 		steps = append(steps, buildSSHSetupSteps(dir, cfg.PublicKeys, cfg.PrivateKeyPEMs, cfg.TerminalUser)...)
@@ -228,10 +227,8 @@ func GetInstanceIP(client IncusClient, name string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address found for %s", name)
 }
 
-// BuildInstanceConfig builds Incus config from template data, SSH public keys, and SSH private key PEMs.
-// sshPublicKeys are added to cloud-init ssh_authorized_keys (allows SSH into the instance).
-// privateKeyPEMs are written to ~/.ssh/ inside the instance (allows git operations from the instance).
-func BuildInstanceConfig(cloudInit string, sshPublicKeys []string, privateKeyPEMs []string, resources map[string]string) map[string]string {
+// BuildInstanceConfig builds Incus config from resource limits.
+func BuildInstanceConfig(resources map[string]string) map[string]string {
 	config := map[string]string{}
 
 	if cpu, ok := resources["cpu"]; ok {
@@ -241,67 +238,7 @@ func BuildInstanceConfig(cloudInit string, sshPublicKeys []string, privateKeyPEM
 		config["limits.memory"] = mem
 	}
 
-	if cloudInit != "" {
-		if len(sshPublicKeys) > 0 {
-			keyLines := strings.Join(sshPublicKeys, "\n    - ")
-			cloudInit += fmt.Sprintf("\nssh_authorized_keys:\n    - %s\n", keyLines)
-		}
-		if len(privateKeyPEMs) > 0 {
-			cloudInit += buildWriteFilesBlock(privateKeyPEMs)
-		}
-		config["user.user-data"] = cloudInit
-	}
-
 	return config
-}
-
-// buildWriteFilesBlock generates a cloud-init write_files block that writes
-// private key files and an SSH config to /home/ubuntu/.ssh/.
-// Assumes the default instance user is "ubuntu" (standard for Ubuntu cloud images).
-// Note: if the template already contains a write_files key, append this block
-// after it or merge manually — duplicate top-level YAML keys are implementation-defined.
-func buildWriteFilesBlock(privateKeyPEMs []string) string {
-	var sb strings.Builder
-	sb.WriteString("\nwrite_files:\n")
-
-	for i, keyPEM := range privateKeyPEMs {
-		keyFile := fmt.Sprintf("plati_key_%d", i)
-		sb.WriteString(fmt.Sprintf("  - path: /home/ubuntu/.ssh/%s\n", keyFile))
-		sb.WriteString("    content: |\n")
-		sb.WriteString(indentContent(keyPEM, "      "))
-		sb.WriteString("    owner: ubuntu:ubuntu\n")
-		sb.WriteString("    permissions: '0600'\n")
-	}
-
-	// Write SSH config so all keys are tried automatically.
-	var sshCfg strings.Builder
-	sshCfg.WriteString("Host *\n")
-	sshCfg.WriteString("  StrictHostKeyChecking accept-new\n")
-	for i := range privateKeyPEMs {
-		sshCfg.WriteString(fmt.Sprintf("  IdentityFile ~/.ssh/plati_key_%d\n", i))
-	}
-
-	sb.WriteString("  - path: /home/ubuntu/.ssh/config\n")
-	sb.WriteString("    content: |\n")
-	sb.WriteString(indentContent(sshCfg.String(), "      "))
-	sb.WriteString("    owner: ubuntu:ubuntu\n")
-	sb.WriteString("    permissions: '0600'\n")
-
-	return sb.String()
-}
-
-// indentContent prefixes every non-empty line with the given indent string.
-func indentContent(s, indent string) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	var out strings.Builder
-	for _, line := range lines {
-		if line == "" {
-			out.WriteByte('\n')
-		} else {
-			out.WriteString(indent + line + "\n")
-		}
-	}
-	return out.String()
 }
 
 // InstanceInfo is a summary of instance state for API responses.

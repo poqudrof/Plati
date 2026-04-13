@@ -36,7 +36,6 @@ type mockIncusClient struct {
 	instances       map[string]*incusapi.Instance
 	instanceIPs     map[string]string
 	volumes         map[string]int
-	cloudInitLog    []string
 	pushedFiles     map[string][]byte // remote path → content
 	runCommandFn    func(name string, command []string) (string, error)
 	streamCommandFn func(name string, command []string) (io.ReadCloser, error)
@@ -58,9 +57,6 @@ func (m *mockIncusClient) CreateInstance(name, image string, profiles []string, 
 		InstancePut: incusapi.InstancePut{
 			Config: cfg,
 		},
-	}
-	if ci, ok := cfg["user.user-data"]; ok {
-		m.cloudInitLog = append(m.cloudInitLog, ci)
 	}
 	m.instanceIPs[name] = "10.0.0.42"
 	return nil
@@ -353,8 +349,7 @@ func seedTemplate(t *testing.T, h *harness) int64 {
 		"description": "Node.js 22 LTS",
 		"image": "images:ubuntu/24.04/cloud",
 		"profiles": ["default"],
-		"resources": {"cpu": "2", "memory": "4GB", "disk": "20GB"},
-		"cloud_init": "#cloud-config\npackages:\n  - nodejs\n"
+		"resources": {"cpu": "2", "memory": "4GB", "disk": "20GB"}
 	}`)
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
 	req.Header.Set("Content-Type", "application/json")
@@ -427,6 +422,85 @@ func TestAdminLogin(t *testing.T) {
 	t.Logf("Logged in as %s (%s)", user.Email, user.Role)
 }
 
+func TestAdminCreateUser(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+
+	// Unauthenticated → 401
+	resp := h.do("POST", "/api/v1/admin/users", map[string]string{
+		"email": "newuser@example.com", "name": "New User", "password": "secret123",
+	})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauthenticated create user: got %d, want 401", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Log in as admin
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	// Missing required fields → 400
+	resp = h.do("POST", "/api/v1/admin/users", map[string]string{"name": "No Email"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing email: got %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Create user → 201
+	resp = h.do("POST", "/api/v1/admin/users", map[string]string{
+		"email":    "alice@example.com",
+		"name":     "Alice",
+		"password": "alicepass",
+		"role":     "user",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create user: %d — %s", resp.StatusCode, body)
+	}
+	var created models.User
+	mustJSON(t, resp, &created)
+	if created.Email != "alice@example.com" {
+		t.Errorf("created email = %q, want alice@example.com", created.Email)
+	}
+	if created.Role != "user" {
+		t.Errorf("created role = %q, want user", created.Role)
+	}
+	t.Logf("Created user: id=%d email=%s", created.ID, created.Email)
+
+	// List users → new user appears
+	resp = h.do("GET", "/api/v1/admin/users", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list users: %d", resp.StatusCode)
+	}
+	var users []models.User
+	mustJSON(t, resp, &users)
+	found := false
+	for _, u := range users {
+		if u.Email == "alice@example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("created user not found in list")
+	}
+
+	// New user can log in with their password
+	jar2, _ := cookiejar.New(nil)
+	client2 := &http.Client{Jar: jar2}
+	data, _ := json.Marshal(map[string]string{"email": "alice@example.com", "password": "alicepass"})
+	req, _ := http.NewRequest("POST", h.srv.URL+"/auth/login", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client2.Do(req)
+	if err != nil {
+		t.Fatalf("alice login request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("alice login: %d — %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+	t.Logf("Alice logged in successfully")
+}
+
 func TestSSHKeyCRUD(t *testing.T) {
 	h := newHarness(t)
 	defer h.teardown()
@@ -491,8 +565,7 @@ func TestTemplateImportAndList(t *testing.T) {
 		"description": "Node.js 22 LTS",
 		"image": "images:ubuntu/24.04/cloud",
 		"profiles": ["default"],
-		"resources": {"cpu": "2", "memory": "4GB", "disk": "20GB"},
-		"cloud_init": "#cloud-config\npackages:\n  - nodejs\n"
+		"resources": {"cpu": "2", "memory": "4GB", "disk": "20GB"}
 	}`
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import",
 		strings.NewReader(tmplJSON))
@@ -535,8 +608,8 @@ func TestInstanceLifecycleWithMockIncus(t *testing.T) {
 	defer h.teardown()
 	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
 
-	// Add SSH key — it should be injected into cloud-init
-	sshPubKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForCloudInit ci-user@laptop"
+	// Add SSH key — it should be injected via exec-based setup
+	sshPubKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForSetup ci-user@laptop"
 	h.do("POST", "/api/v1/ssh-keys", map[string]string{
 		"name": "ci-key", "public_key": sshPubKey,
 	}).Body.Close()
@@ -563,15 +636,29 @@ func TestInstanceLifecycleWithMockIncus(t *testing.T) {
 		t.Error("mock: no Incus instance was created")
 	}
 
-	// Verify SSH key was injected into cloud-init
-	if len(h.mock.cloudInitLog) == 0 {
-		t.Error("mock: no cloud-init data was sent")
-	} else {
-		ci := h.mock.cloudInitLog[0]
-		if !strings.Contains(ci, sshPubKey) {
-			t.Errorf("SSH key not found in cloud-init\ncloud-init:\n%s", ci)
+	// Wait for async setup to complete (file push happens in background goroutine)
+	for i := 0; i < 100; i++ {
+		resp = h.do("GET", fmt.Sprintf("/api/v1/instances/%d", inst.ID), nil)
+		var updated models.InstanceJSON
+		mustJSON(t, resp, &updated)
+		if updated.Status == "running" || updated.Status == "error" {
+			break
 		}
-		t.Logf("SSH key correctly injected into cloud-init")
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Verify SSH key was pushed via exec-based setup (file push to authorized_keys)
+	foundKey := false
+	for dest, content := range h.mock.pushedFiles {
+		if strings.Contains(dest, "authorized_keys") && strings.Contains(string(content), sshPubKey) {
+			foundKey = true
+			break
+		}
+	}
+	if !foundKey {
+		t.Error("SSH key not found in pushed authorized_keys files")
+	} else {
+		t.Logf("SSH key correctly pushed via exec-based setup")
 	}
 
 	// Verify volume was created
@@ -739,8 +826,7 @@ func TestSecretInjectionIntoInstance(t *testing.T) {
 		"description": "System container with Tailscale VPN",
 		"image": "images:ubuntu/24.04/cloud",
 		"profiles": ["default"],
-		"resources": {"cpu": "1", "memory": "512MB", "disk": "5GB"},
-		"cloud_init": "#cloud-config\npackages:\n  - curl\n  - iptables\nruncmd:\n  - curl -fsSL https://tailscale.com/install.sh | sh\n  - systemctl enable tailscaled\n  - systemctl start tailscaled\n  - '[ -n \"$TAILSCALE_AUTH_KEY\" ] && tailscale up --auth-key=\"$TAILSCALE_AUTH_KEY\"'\n"
+		"resources": {"cpu": "1", "memory": "512MB", "disk": "5GB"}
 	}`)
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", tailscaleTemplate)
 	req.Header.Set("Content-Type", "application/json")
@@ -783,18 +869,6 @@ func TestSecretInjectionIntoInstance(t *testing.T) {
 		t.Errorf("secret value mismatch: got %q, want %q", gotValue, tailscaleKey)
 	} else {
 		t.Logf("TAILSCALE_AUTH_KEY correctly injected into Incus config")
-	}
-
-	// Verify cloud-init contains the tailscale up command
-	if len(h.mock.cloudInitLog) == 0 {
-		t.Error("mock: no cloud-init data sent")
-	} else {
-		ci := h.mock.cloudInitLog[len(h.mock.cloudInitLog)-1]
-		if !strings.Contains(ci, "TAILSCALE_AUTH_KEY") {
-			t.Errorf("cloud-init does not reference TAILSCALE_AUTH_KEY\ncloud-init:\n%s", ci)
-		} else {
-			t.Logf("Cloud-init correctly references TAILSCALE_AUTH_KEY")
-		}
 	}
 
 	// Also verify that rebuild re-injects the secret
@@ -899,8 +973,7 @@ func TestSshxURLEndpoint(t *testing.T) {
 	body := strings.NewReader(`{
 		"name":"SSHX","slug":"sshx","description":"Collaborative terminal",
 		"image":"images:ubuntu/24.04/cloud","profiles":["default"],
-		"resources":{"cpu":"1","memory":"512MB","disk":"5GB"},
-		"cloud_init":"#cloud-config\n"
+		"resources":{"cpu":"1","memory":"512MB","disk":"5GB"}
 	}`)
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
 	req.Header.Set("Content-Type", "application/json")
@@ -960,7 +1033,6 @@ func TestEphemeralInstanceNoVolume(t *testing.T) {
 		"name":"Ephemeral","slug":"ephemeral-test","description":"No volumes",
 		"image":"images:alpine/3.20","profiles":["default"],
 		"resources":{"cpu":"1","memory":"256MB","disk":"5GB"},
-		"cloud_init":"#cloud-config\n",
 		"persistence":{"mode":"ephemeral"}
 	}`)
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
@@ -1691,7 +1763,6 @@ func TestDiskListingEphemeral(t *testing.T) {
 		"name":"EphemeralDisk","slug":"ephemeral-disk","description":"No volumes",
 		"image":"images:alpine/3.20","profiles":["default"],
 		"resources":{"cpu":"1","memory":"256MB","disk":"5GB"},
-		"cloud_init":"#cloud-config\n",
 		"persistence":{"mode":"ephemeral"}
 	}`)
 	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/admin/templates/import", body)
@@ -1744,7 +1815,6 @@ func TestDiskListingMultiVolume(t *testing.T) {
 		"name":"MultiVol","slug":"multi-vol","description":"Two volumes",
 		"image":"images:ubuntu/24.04/cloud","profiles":["default"],
 		"resources":{"cpu":"1","memory":"512MB"},
-		"cloud_init":"#cloud-config\n",
 		"persistence":{
 			"mode":"normal",
 			"directories":[

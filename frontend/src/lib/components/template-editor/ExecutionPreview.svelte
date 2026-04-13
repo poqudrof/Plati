@@ -56,7 +56,7 @@
     const steps: Step[] = [];
     const who = isRoot ? 'root' : user;
     if (!isRoot) {
-      steps.push({ category: 'ssh', label: 'Wait for cloud-init to finish' });
+      steps.push({ category: 'ssh', label: `Wait for user ${user}` });
     }
     steps.push({ category: 'ssh', label: `Setup SSH keys for ${who} (authorized_keys + private keys + config)` });
     return steps;

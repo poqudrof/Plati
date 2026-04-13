@@ -6,7 +6,7 @@
 |-------|------|--------------|---------|
 | Go unit tests | Unit | None | `cd backend && go test ./internal/incus/...` |
 | Go integration tests | Integration | None (mock Incus, in-memory DB) | `cd backend && go test ./internal/integration/...` |
-| Image (cloud-init) tests | E2E | Live Incus server + internet access | `./tests.sh --image` |
+| Image (e2e) tests | E2E | Live Incus server + internet access | `./tests.sh --image` |
 | Playwright screenshots | Visual/E2E | Running dev stack | `./tests.sh --screenshots` |
 | Shell API lifecycle | API | Running server + Incus | `./tests.sh --api-lifecycle` |
 | Shell API admin | API | Running server | `./tests.sh --api-admin` |
@@ -46,13 +46,11 @@ Tests `buildInstanceConfig` in isolation (no Incus daemon required).
 
 | Test | Description |
 |------|-------------|
-| `TestBuildInstanceConfig_CloudInitSet` | Cloud-init data is set in instance config |
-| `TestBuildInstanceConfig_NoCloudInitWhenEmpty` | Cloud-init is omitted when empty |
-| `TestBuildInstanceConfig_SSHKeysAppended` | SSH keys are appended to cloud-init |
-| `TestBuildInstanceConfig_SSHKeysNotAppendedWhenEmpty` | SSH keys are not added when list is empty |
-| `TestBuildInstanceConfig_PrivateKeyWriteFiles` | Private key `write_files` block is generated |
 | `TestBuildInstanceConfig_Resources` | CPU and memory resource limits are set |
-| `TestBuildInstanceConfig_HeaderPreservedAfterKeyInjection` | `#cloud-config` header survives key injection |
+| `TestBuildSetupCommands_RootSSHAlways` | SSH authorized_keys pushed for root |
+| `TestBuildSetupCommands_TerminalUser` | SSH setup for terminal_user with user wait |
+| `TestBuildSetupCommands_Secrets` | Secrets written to env file |
+| `TestBuildSetupCommands_PostCreateCmds` | Post-create commands executed |
 
 ```bash
 cd backend && go test ./internal/incus/...
@@ -60,19 +58,18 @@ cd backend && go test ./internal/incus/...
 
 ---
 
-## Image (cloud-init) Tests
+## Image (e2e) Tests
 
 **File:** `backend/internal/e2e/image_test.go`
 
-Provisions real Incus containers using the actual template cloud-init scripts, waits for
-cloud-init to finish, then runs targeted assertions inside the container. Each test creates
+Provisions real Incus containers using the actual template definitions, waits for
+readiness, then runs targeted assertions inside the container. Each test creates
 a uniquely-named container and deletes it via `t.Cleanup` even on failure.
 
 **Requirements:**
 - Incus server accessible (default `https://127.0.0.1:8443`)
 - Container internet access (apt installs packages from Ubuntu mirrors)
 - TLS client cert/key at `config/plati-client.crt` / `config/plati-client.key` (or via env vars)
-- Templates must use `images:ubuntu/24.04/cloud` — the `/cloud` variant includes cloud-init; the bare `images:ubuntu/24.04` does not
 
 **Skip conditions:** Tests skip automatically when the cert files are missing or the Incus server is unreachable. `TestImage_Tailscale` also skips when the `tailscale` Incus profile hasn't been created.
 
@@ -106,7 +103,7 @@ cd backend && go test -v -run TestImage_SSHX -timeout 30m ./internal/e2e/...
 | `INCUS_TLS_CERT` | `config/plati-client.crt` | Path to TLS client cert |
 | `INCUS_TLS_KEY` | `config/plati-client.key` | Path to TLS client key |
 | `TAILSCALE_AUTH_KEY` | _(unset)_ | Auth key for tailscale join check |
-| `IMAGE_TIMEOUT_SEC` | `300` | Seconds to wait for cloud-init per container |
+| `IMAGE_TIMEOUT_SEC` | `300` | Seconds to wait for container readiness |
 
 ---
 
@@ -122,7 +119,7 @@ Full HTTP API tests using a mock `IncusClient` and in-memory SQLite. No real Inc
 | `TestAdminLogin` | Admin password auth + `/auth/me` |
 | `TestSSHKeyCRUD` | Add, list, delete SSH keys |
 | `TestTemplateImportAndList` | Import template via API, list templates |
-| `TestInstanceLifecycleWithMockIncus` | Create → verify cloud-init → start → stop → delete |
+| `TestInstanceLifecycleWithMockIncus` | Create → verify SSH key push → start → stop → delete |
 | `TestRebuildKeepsWorkspace` | Rebuild preserves workspace volume |
 | `TestAdminCanCreateInstanceForUser` | Admin creates instance on behalf of user |
 | `TestSecretInjectionIntoInstance` | Secrets injected as env vars and persist through rebuild |

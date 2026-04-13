@@ -1,0 +1,1 @@
+ALTER TABLE templates ADD COLUMN cloud_init TEXT NOT NULL DEFAULT '';

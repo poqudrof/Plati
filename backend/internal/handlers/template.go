@@ -177,6 +177,21 @@ func (h *TemplateHandler) SaveToDisk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "saved"})
 }
 
+// ReloadFromDisk reads the template's YAML file from disk and re-imports it into the DB.
+func (h *TemplateHandler) ReloadFromDisk(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	tmpl, err := h.svc.ReloadFromDisk(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tmpl)
+}
+
 // UpdateFromYAML parses a YAML string from the request body and updates the template.
 func (h *TemplateHandler) UpdateFromYAML(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")

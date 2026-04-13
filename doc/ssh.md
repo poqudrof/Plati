@@ -2,7 +2,7 @@
 
 ## Overview
 
-Plati injects your SSH public keys into instances at creation time via cloud-init. This means you can `ssh` directly into any instance using your private key — no passwords, no manual setup.
+Plati injects your SSH public keys into instances at creation time. This means you can `ssh` directly into any instance using your private key — no passwords, no manual setup.
 
 ## Adding Your Keys
 
@@ -27,23 +27,15 @@ You can add multiple keys (e.g. laptop, desktop, CI).
 | Instance **rebuilt** | Yes — all your current keys at rebuild time |
 | Instance deleted | N/A |
 
-Keys are written once during cloud-init on first boot. If you add a new key after an instance already exists, it will **not** appear automatically — you need to rebuild the instance (Settings → Rebuild). Rebuilding recreates the container but preserves your `/workspace` volume.
+Keys are written once during instance setup. If you add a new key after an instance already exists, it will **not** appear automatically — you need to rebuild the instance (Settings → Rebuild). Rebuilding recreates the container but preserves your `/workspace` volume.
 
 ## How It Works Internally
 
 When you create (or rebuild) an instance, the backend:
 
 1. Fetches all SSH keys stored for your user account.
-2. Appends them to the template's cloud-init YAML as `ssh_authorized_keys`.
-3. Passes the combined config to Incus, which runs cloud-init on first boot.
-
-The resulting cloud-init block looks like:
-
-```yaml
-ssh_authorized_keys:
-  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... you@laptop
-  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... you@desktop
-```
+2. Pushes them into the instance's `~/.ssh/authorized_keys` via `incus exec` / file push.
+3. Sets correct ownership and permissions on the `.ssh` directory.
 
 You do **not** need to configure SSH keys in your template — Plati handles this automatically.
 

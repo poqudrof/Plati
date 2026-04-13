@@ -93,6 +93,68 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+// User SSH key management (admin acts on behalf of a user)
+
+func (h *AdminHandler) ListUserKeys(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	keys, err := h.userSvc.ListUserSSHKeys(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list keys")
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+// GenerateUserKey generates a keypair for a user.
+// The private key is stored encrypted on the server and never returned to the admin.
+func (h *AdminHandler) GenerateUserKey(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	key, _, err := h.userSvc.GenerateUserSSHKey(userID, req.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate key")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":         key.ID,
+		"name":       key.Name,
+		"public_key": key.PublicKey,
+		"created_at": key.CreatedAt,
+	})
+}
+
+func (h *AdminHandler) DeleteUserKey(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	keyID, err := parseID(r, "key_id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid key_id")
+		return
+	}
+	if err := h.userSvc.DeleteUserSSHKey(keyID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete key")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
 func (h *AdminHandler) ListAllInstances(w http.ResponseWriter, r *http.Request) {
 	instances, err := queries.ListAllInstances(h.db)
 	if err != nil {

@@ -32,6 +32,14 @@ export interface GeneratedKeyResult {
   private_key: string;
 }
 
+// Response from POST /admin/users/{id}/keys/generate — private key stays on server.
+export interface AdminGeneratedUserKeyResult {
+  id: number;
+  name: string;
+  public_key: string;
+  created_at: string;
+}
+
 // Admin-managed shared keypair.
 export interface ManagedSSHKey {
   id: number;
@@ -75,7 +83,6 @@ export interface Template {
   image: string;
   profiles: string;
   resources: string;
-  cloud_init: string;
   /** Non-root login user for the second terminal button. Empty = root only. */
   terminal_user: string;
   /** JSON array of shell commands run via incus exec after instance starts (deprecated). */

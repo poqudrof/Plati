@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo } from './types';
+import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo } from './types';
 
 // Setup
 export const setup = {
@@ -107,7 +107,8 @@ export const admin = {
     exportYAML: (id: number) => api.get<{ yaml: string }>(`/api/v1/admin/templates/${id}/export-yaml`),
     updateFromYAML: (id: number, yaml: string) => api.post<Template>(`/api/v1/admin/templates/${id}/update-from-yaml`, { yaml }),
     getDebugInstance: (id: number) => api.get<Instance>(`/api/v1/admin/templates/${id}/debug/instance`),
-    saveToDisk: (id: number) => api.post<{ message: string }>(`/api/v1/admin/templates/${id}/save-to-disk`)
+    saveToDisk: (id: number) => api.post<{ message: string }>(`/api/v1/admin/templates/${id}/save-to-disk`),
+    reloadFromDisk: (id: number) => api.post<Template>(`/api/v1/admin/templates/${id}/reload-from-disk`, {})
   },
   servers: {
     list: () => api.get<Server[]>('/api/v1/admin/servers')
@@ -121,7 +122,12 @@ export const admin = {
       api.post<User>('/api/v1/admin/users', { email, name, password, role }),
     update: (id: number, name: string, role: string) =>
       api.put(`/api/v1/admin/users/${id}`, { name, role }),
-    delete: (id: number) => api.del(`/api/v1/admin/users/${id}`)
+    delete: (id: number) => api.del(`/api/v1/admin/users/${id}`),
+    listKeys: (id: number) => api.get<UserSSHKey[]>(`/api/v1/admin/users/${id}/keys`),
+    generateKey: (id: number, name: string) =>
+      api.post<AdminGeneratedUserKeyResult>(`/api/v1/admin/users/${id}/keys/generate`, { name }),
+    deleteKey: (userId: number, keyId: number) =>
+      api.del(`/api/v1/admin/users/${userId}/keys/${keyId}`)
   },
   instances: {
     list: () => api.get<Instance[]>('/api/v1/admin/instances'),

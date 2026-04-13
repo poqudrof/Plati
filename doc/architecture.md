@@ -75,7 +75,7 @@ The `internal/incus/` package abstracts Incus server communication:
 
 - **Client** (`client.go`): Wraps the Incus Go SDK with TLS mutual authentication. Implements the `IncusClient` interface for testability.
 - **Pool** (`pool.go`): Thread-safe map of named Incus clients. Supports multi-server deployments.
-- **Instance operations** (`instances.go`): Build instance config from templates (cloud-init, SSH key injection, resource limits). Get instance IP addresses.
+- **Instance operations** (`instances.go`): Build instance config from templates (resource limits). SSH key injection and setup commands via exec. Get instance IP addresses.
 - **Volume operations** (`volumes.go`): Create, attach, detach, and delete storage volumes for persistent `/workspace` data.
 
 ### Instance Lifecycle
@@ -93,7 +93,7 @@ User selects template
   Create storage volume (workspace)
         │
         ▼
-  Create Incus instance (image + profiles + cloud-init + limits)
+  Create Incus instance (image + profiles + limits)
         │
         ▼
   Attach volume at /workspace
@@ -114,7 +114,7 @@ Migrations are embedded in the binary via `//go:embed` and applied at startup. A
 
 Tables: `users`, `ssh_keys`, `secrets`, `servers`, `templates`, `volumes`, `instances`.
 
-Template metadata (profiles, resources, cloud-init) is stored as JSON text columns, parsed at the service layer.
+Template metadata (profiles, resources) is stored as JSON text columns, parsed at the service layer.
 
 ### Secret Encryption
 

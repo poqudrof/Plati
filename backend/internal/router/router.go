@@ -138,6 +138,7 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/templates/{id}/export-yaml", deps.TemplateHandler.ExportYAMLAsJSON)
 				r.Post("/templates/{id}/update-from-yaml", deps.TemplateHandler.UpdateFromYAML)
 				r.Post("/templates/{id}/save-to-disk", deps.TemplateHandler.SaveToDisk)
+				r.Post("/templates/{id}/reload-from-disk", deps.TemplateHandler.ReloadFromDisk)
 				r.Get("/templates/{id}/debug/instance", deps.AdminHandler.GetDebugInstance)
 
 				// Servers
@@ -151,6 +152,11 @@ func New(deps Deps) *chi.Mux {
 				r.Post("/users", deps.AdminHandler.CreateUser)
 				r.Put("/users/{id}", deps.AdminHandler.UpdateUser)
 				r.Delete("/users/{id}", deps.AdminHandler.DeleteUser)
+
+				// User SSH key management (admin on behalf of user)
+				r.Get("/users/{id}/keys", deps.AdminHandler.ListUserKeys)
+				r.Post("/users/{id}/keys/generate", deps.AdminHandler.GenerateUserKey)
+				r.Delete("/users/{id}/keys/{key_id}", deps.AdminHandler.DeleteUserKey)
 
 				// Managed SSH Keys
 				r.Get("/managed-keys", deps.ManagedKeyHandler.List)

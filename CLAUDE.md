@@ -65,7 +65,7 @@ JWT stored in `plati_token` httpOnly cookie. `AuthMiddleware` validates it. `Adm
 `internal/incus/`:
 - `client.go` — wraps Incus SDK, implements `IncusClient` interface
 - `pool.go` — thread-safe map of named clients
-- `instances.go` — build config from templates (cloud-init, SSH keys, resource limits); `SetupConfig` drives first-init vs rebuild command split
+- `instances.go` — build config from templates (resource limits); `SetupConfig` drives SSH key injection, first-init vs rebuild command split
 - `volumes.go` — create/attach/detach/delete workspace volumes (parameterized by device name)
 
 ## SSH Key Modes
@@ -226,7 +226,7 @@ make clean          # remove artifacts
 ./tests.sh --all          # all suites (requires docker dev stack running)
 ./tests.sh --screenshots  # Playwright screenshots only
 ./tests.sh --api-admin    # shell admin API tests only
-./tests.sh --image        # cloud-init image tests (requires Incus + internet)
+./tests.sh --image        # image e2e tests (requires Incus + internet)
 ```
 
 Docker dev stack runs frontend on `:5300`, backend on `:8080`. `tests.sh` defaults match these ports.

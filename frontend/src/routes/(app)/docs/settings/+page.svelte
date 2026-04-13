@@ -18,7 +18,7 @@
 cat ~/.ssh/id_ed25519.pub</pre>
       <p>Copy the output and paste it as a new SSH key in Plati.</p>
       <div class="bg-amber-50 border border-amber-200 rounded p-3 text-amber-800 text-xs">
-        <b>Important:</b> SSH keys are injected into instances at <b>creation time</b> via cloud-init. If you add a key after creating an instance, you need to <b>rebuild</b> that instance for the new key to take effect.
+        <b>Important:</b> SSH keys are injected into instances at <b>creation time</b>. If you add a key after creating an instance, you need to <b>rebuild</b> that instance for the new key to take effect.
       </div>
     </div>
   </section>

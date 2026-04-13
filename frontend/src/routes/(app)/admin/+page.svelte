@@ -1,7 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
-  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo } from '$lib/api/types';
+  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' | 'repos' = $state('templates');
@@ -30,6 +30,12 @@
   let generatedKey: GeneratedManagedKeyResult | null = $state(null);
   let assigningKey: { id: number; name: string; assignedIDs: number[] } | null = $state(null);
   let serverGitKeyID = $state(0);
+
+  // Per-user SSH key management
+  let managingKeysForUser: User | null = $state(null);
+  let userKeys: UserSSHKey[] = $state([]);
+  let newUserKeyName = $state('');
+  let userKeyGenerating = $state(false);
 
   async function loadTemplates() {
     try { templateList = await templatesApi.list(); } catch (e: any) { addNotification('error', 'Failed to load templates: ' + e.message); }
@@ -181,6 +187,36 @@
     } else {
       assigningKey.assignedIDs = assigningKey.assignedIDs.filter(id => id !== userId);
     }
+  }
+
+  async function openUserKeys(user: User) {
+    managingKeysForUser = user;
+    newUserKeyName = '';
+    try {
+      userKeys = await admin.users.listKeys(user.id);
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function generateUserKey() {
+    if (!managingKeysForUser || !newUserKeyName.trim()) return;
+    userKeyGenerating = true;
+    try {
+      const key = await admin.users.generateKey(managingKeysForUser.id, newUserKeyName.trim());
+      newUserKeyName = '';
+      userKeys = await admin.users.listKeys(managingKeysForUser.id);
+      addNotification('success', `Key "${key.name}" generated — public key ready to copy`);
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { userKeyGenerating = false; }
+  }
+
+  async function deleteUserKey(keyId: number) {
+    if (!managingKeysForUser) return;
+    if (!confirm('Delete this key? Instances using it will lose access on next rebuild.')) return;
+    try {
+      await admin.users.deleteKey(managingKeysForUser.id, keyId);
+      userKeys = await admin.users.listKeys(managingKeysForUser.id);
+      addNotification('success', 'Key deleted');
+    } catch (e: any) { addNotification('error', e.message); }
   }
 
   function copyText(text: string, label: string) {
@@ -359,12 +395,6 @@
                   <span class="text-gray-500">Updated:</span> {new Date(tmpl.updated_at).toLocaleString()}
                 </div>
               </div>
-              {#if tmpl.cloud_init}
-                <div>
-                  <p class="text-sm text-gray-500 mb-1">Cloud-Init:</p>
-                  <pre class="text-xs bg-gray-50 border rounded p-3 overflow-x-auto max-h-48">{tmpl.cloud_init}</pre>
-                </div>
-              {/if}
             </div>
           {/if}
         </div>
@@ -586,6 +616,7 @@
               </td>
               <td class="px-4 py-3 text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString()}</td>
               <td class="px-4 py-3 text-right">
+                <button onclick={() => openUserKeys(user)} class="text-gray-600 hover:text-gray-800 text-sm mr-2">Keys</button>
                 <button onclick={() => startEditUser(user)} class="text-primary hover:text-primary-dark text-sm mr-2">Edit</button>
                 <button onclick={() => deleteUser(user)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
               </td>
@@ -771,10 +802,6 @@
             <input type="text" bind:value={editingTemplate.terminal_user} placeholder="e.g. ubuntu (leave empty for root only)" class="w-full px-3 py-2 border rounded text-sm" />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Cloud-Init</label>
-            <textarea bind:value={editingTemplate.cloud_init} rows="8" class="w-full px-3 py-2 border rounded font-mono text-sm"></textarea>
-          </div>
-          <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Post-create commands (one per line, run via Incus exec)</label>
             <textarea
               rows="4"
@@ -826,6 +853,65 @@
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
           <button onclick={() => creatingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
           <button onclick={createUser} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Manage User Keys Modal -->
+{#if managingKeysForUser}
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) managingKeysForUser = null; }}>
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-6">
+        <h2 class="text-lg font-bold mb-1">SSH Keys — {managingKeysForUser.email}</h2>
+        <p class="text-sm text-gray-500 mb-4">
+          Generate a keypair on behalf of this user. The private key is stored encrypted on the server
+          and injected automatically into their instances. Copy the public key to add to GitHub or a git repo.
+        </p>
+
+        <div class="space-y-3 mb-4">
+          {#each userKeys as key}
+            <div class="p-3 bg-gray-50 rounded border">
+              <div class="flex justify-between items-start">
+                <div class="min-w-0 flex-1">
+                  <span class="font-medium text-sm">{key.name}</span>
+                  <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+                </div>
+                <button onclick={() => deleteUserKey(key.id)} class="text-red-600 hover:text-red-800 text-sm ml-4 shrink-0">Delete</button>
+              </div>
+              <div class="flex items-center gap-2 mt-2">
+                <code class="text-xs text-gray-500 font-mono truncate flex-1">{key.public_key.substring(0, 60)}…</code>
+                <button
+                  onclick={() => copyText(key.public_key, 'Public key')}
+                  class="text-xs text-primary hover:text-primary-dark border border-primary/20 rounded px-2 py-0.5 shrink-0"
+                >Copy public key</button>
+              </div>
+            </div>
+          {/each}
+          {#if userKeys.length === 0}
+            <p class="text-sm text-gray-500">No keys yet.</p>
+          {/if}
+        </div>
+
+        <div class="border-t pt-4 flex gap-3">
+          <input
+            bind:value={newUserKeyName}
+            placeholder="Key name (e.g. plati-{managingKeysForUser.name || 'user'})"
+            class="flex-1 px-3 py-2 border rounded text-sm"
+            onkeydown={(e) => e.key === 'Enter' && generateUserKey()}
+          />
+          <button
+            onclick={generateUserKey}
+            disabled={userKeyGenerating || !newUserKeyName.trim()}
+            class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap"
+          >
+            {userKeyGenerating ? 'Generating…' : 'Generate Key'}
+          </button>
+        </div>
+
+        <div class="flex justify-end mt-6 pt-4 border-t">
+          <button onclick={() => managingKeysForUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Close</button>
         </div>
       </div>
     </div>

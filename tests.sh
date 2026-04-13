@@ -128,7 +128,7 @@ $RUN_SCREENSHOTS && run_suite "Playwright screenshots" suite_screenshots
 $RUN_API_LIFECYCLE && run_suite "Shell API lifecycle"  suite_api_lifecycle
 $RUN_API_ADMIN   && run_suite "Shell API admin"       suite_api_admin
 $RUN_SELENIUM    && run_suite "Python Selenium E2E"   suite_selenium
-$RUN_IMAGE         && run_suite "Image (cloud-init) tests" suite_image
+$RUN_IMAGE         && run_suite "Image (e2e) tests"        suite_image
 $RUN_E2E_INSTANCE  && run_suite "Instance E2E tests"      suite_e2e_instance
 
 # --- summary ---

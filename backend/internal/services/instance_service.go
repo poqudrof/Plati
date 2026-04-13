@@ -269,7 +269,7 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 	incusName := fmt.Sprintf("plati-%d-%s", req.UserID, sanitizeName(req.Name))
 
 	// Build config
-	config := incus.BuildInstanceConfig(tmpl.CloudInit, publicKeys, privateKeys, resources)
+	config := incus.BuildInstanceConfig(resources)
 
 	// Inject global secrets as environment variables (instanceID=0 for new instance)
 	secretsEnv := s.buildSecretsEnv(req.UserID, 0, tsMode)
@@ -487,7 +487,7 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 
 		secretsEnv := s.buildSecretsEnv(req.UserID, 0, tsMode)
 		secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(req.Name)
-		config := incus.BuildInstanceConfig(tmpl.CloudInit, publicKeys, privateKeys, resources)
+		config := incus.BuildInstanceConfig(resources)
 		for k, v := range secretsEnv {
 			config["environment."+k] = v
 		}
@@ -714,7 +714,7 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 
 	secretsEnv := s.buildSecretsEnv(userID, id, prefs.TailscaleMode)
 	secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(inst.Name)
-	config := incus.BuildInstanceConfig(tmpl.CloudInit, publicKeys, privateKeys, resources)
+	config := incus.BuildInstanceConfig(resources)
 	for k, v := range secretsEnv {
 		config["environment."+k] = v
 	}
