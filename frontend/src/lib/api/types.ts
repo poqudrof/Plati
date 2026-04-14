@@ -176,6 +176,12 @@ export interface TailscaleStatusResult {
   machine_name: string;
 }
 
+export interface ProfileCheck {
+  profile: string;
+  server: string;
+  exists: boolean;
+}
+
 export interface InstanceSecret {
   id: number;
   instance_id: number;

@@ -67,6 +67,7 @@ type IncusClient interface {
 
 	// Server info
 	GetServerResources() (*incusapi.Resources, error)
+	GetProfileNames() ([]string, error)
 
 	// Storage file operations
 	ListDirectory(instanceName, path string) ([]FileEntry, error)

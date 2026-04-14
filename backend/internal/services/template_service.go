@@ -491,6 +491,11 @@ func (s *TemplateService) ExportYAML(id int64) ([]byte, error) {
 // SyncFromDir syncs the templates table with YAML files on disk.
 // Templates present on disk are upserted; DB templates with no matching YAML are deleted.
 func (s *TemplateService) SyncFromDir(dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		log.Printf("warning: templates dir does not exist: %s (skipping sync)", dir)
+		return nil
+	}
+
 	if err := s.LoadMixinsFromDir(dir); err != nil {
 		log.Printf("warning: load mixins: %v", err)
 	}

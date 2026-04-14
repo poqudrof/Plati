@@ -140,6 +140,7 @@ func New(deps Deps) *chi.Mux {
 				r.Post("/templates/{id}/save-to-disk", deps.TemplateHandler.SaveToDisk)
 				r.Post("/templates/{id}/reload-from-disk", deps.TemplateHandler.ReloadFromDisk)
 				r.Get("/templates/{id}/debug/instance", deps.AdminHandler.GetDebugInstance)
+				r.Get("/templates/{id}/profiles/check", deps.AdminHandler.CheckTemplateProfiles)
 
 				// Servers
 				r.Get("/servers", deps.ServerHandler.List)

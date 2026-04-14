@@ -135,6 +135,10 @@ func (m *mockIncusClient) GetServerResources() (*incusapi.Resources, error) {
 	return &incusapi.Resources{}, nil
 }
 
+func (m *mockIncusClient) GetProfileNames() ([]string, error) {
+	return []string{"default"}, nil
+}
+
 func (m *mockIncusClient) ExecInstance(name string, command []string, env map[string]string, stdin io.ReadCloser, stdout io.WriteCloser, control func(conn *websocket.Conn)) error {
 	return nil
 }

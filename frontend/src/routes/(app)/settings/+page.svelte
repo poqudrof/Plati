@@ -1,5 +1,6 @@
 <script lang="ts">
   import SSHKeyManager from '$lib/components/SSHKeyManager.svelte';
+  import MachineKeysSection from '$lib/components/MachineKeysSection.svelte';
   import { browser } from '$app/environment';
   import { users } from '$lib/api';
   import type { Secret, UserPreferences } from '$lib/api/types';
@@ -9,7 +10,8 @@
   let newSecretName = $state('');
   let newSecretValue = $state('');
   let prefs: UserPreferences | null = $state(null);
-  let savingPrefs = $state(false);
+  let savingMachineKey = $state(false);
+  let savingTailscale = $state(false);
 
   async function loadSecrets() {
     secrets = await users.listSecrets();
@@ -19,19 +21,35 @@
     prefs = await users.preferences();
   }
 
-  async function savePrefs() {
+  async function saveMachineKeyMode() {
     if (!prefs) return;
-    savingPrefs = true;
+    savingMachineKey = true;
     try {
       prefs = await users.updatePreferences({
         ssh_key_mode: prefs.ssh_key_mode,
         tailscale_mode: prefs.tailscale_mode
       });
-      addNotification('success', 'Preferences saved');
+      addNotification('success', 'Saved');
     } catch (e: any) {
       addNotification('error', e.message);
     } finally {
-      savingPrefs = false;
+      savingMachineKey = false;
+    }
+  }
+
+  async function saveTailscaleMode() {
+    if (!prefs) return;
+    savingTailscale = true;
+    try {
+      prefs = await users.updatePreferences({
+        ssh_key_mode: prefs.ssh_key_mode,
+        tailscale_mode: prefs.tailscale_mode
+      });
+      addNotification('success', 'Saved');
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally {
+      savingTailscale = false;
     }
   }
 
@@ -63,19 +81,23 @@
 <div class="space-y-8">
   <h1 class="text-2xl font-extrabold tracking-tight text-gray-900">Settings</h1>
 
-  <!-- ─── SSH Keys ──────────────────────────────────────────── -->
-  <section class="space-y-4">
-    <div>
-      <h2 class="text-lg font-bold text-gray-900">SSH Keys</h2>
-      <p class="text-sm text-gray-500 leading-relaxed mt-0.5">
-        Two separate key flows — one for logging into your instances, one for your instances to access git repos.
-      </p>
-    </div>
-
+  <!-- ─── Access Keys ─────────────────────────────────────────── -->
+  <section>
     <SSHKeyManager />
   </section>
 
-  <!-- ─── Machine Key Mode ──────────────────────────────────── -->
+  <!-- ─── Machine Keys ────────────────────────────────────────── -->
+  {#if prefs}
+  <section>
+    <MachineKeysSection
+      bind:sshKeyMode={prefs.ssh_key_mode}
+      onSave={saveMachineKeyMode}
+      saving={savingMachineKey}
+    />
+  </section>
+  {/if}
+
+  <!-- ─── Tailscale Auth Key ─────────────────────────────────── -->
   {#if prefs}
   <section>
     <div class="card-static p-6 space-y-5">
@@ -86,61 +108,23 @@
           </svg>
         </div>
         <div>
-          <h2 class="text-base font-bold text-gray-900">Machine Key Mode</h2>
-          <p class="text-sm text-gray-500 leading-relaxed">Which private key gets injected into your instances for git access.</p>
+          <h2 class="text-base font-bold text-gray-900">Tailscale Auth Key</h2>
+          <p class="text-sm text-gray-500 leading-relaxed">Which Tailscale key is injected when your instances join the tailnet.</p>
         </div>
       </div>
 
       <div class="space-y-3">
-        <!-- Plati mode -->
-        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
-          {prefs.ssh_key_mode === 'plati'
-            ? 'border-primary bg-primary-50'
-            : 'border-gray-200 bg-white hover:border-gray-300'}">
-          <input type="radio" bind:group={prefs.ssh_key_mode} value="plati" class="mt-0.5 accent-primary" />
-          <div class="min-w-0">
-            <div class="flex items-center gap-2 mb-0.5">
-              <span class="text-sm font-semibold text-gray-900">Admin-managed key</span>
-              <span class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary font-medium border border-primary/20">Recommended</span>
-            </div>
-            <p class="text-xs text-gray-500 leading-relaxed">
-              The key your admin assigned to you is injected into every instance.
-              Gives automatic access to org repos — no setup needed.
-            </p>
-          </div>
-        </label>
-
-        <!-- Personal mode -->
-        <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
-          {prefs.ssh_key_mode === 'personal'
-            ? 'border-primary bg-primary-50'
-            : 'border-gray-200 bg-white hover:border-gray-300'}">
-          <input type="radio" bind:group={prefs.ssh_key_mode} value="personal" class="mt-0.5 accent-primary" />
-          <div class="min-w-0">
-            <span class="text-sm font-semibold text-gray-900">My machine key</span>
-            <p class="text-xs text-gray-500 leading-relaxed mt-0.5">
-              Your personal machine key (generated above) is injected instead.
-              Use this when you want instances to authenticate as your own GitHub account.
-            </p>
-          </div>
-        </label>
-      </div>
-
-      <!-- Tailscale mode -->
-      <div class="border-t border-gray-100 pt-5 space-y-3">
-        <div>
-          <p class="text-sm font-semibold text-gray-900 mb-0.5">Tailscale Auth Key</p>
-          <p class="text-xs text-gray-500">Which Tailscale key is injected when your instances join the tailnet.</p>
-        </div>
-
         <label class="flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors
           {prefs.tailscale_mode === 'plati'
             ? 'border-primary bg-primary-50'
             : 'border-gray-200 bg-white hover:border-gray-300'}">
           <input type="radio" bind:group={prefs.tailscale_mode} value="plati" class="mt-0.5 accent-primary" />
           <div>
-            <span class="text-sm font-semibold text-gray-900">Platform key</span>
-            <p class="text-xs text-gray-500 leading-relaxed mt-0.5">Use the platform-level Tailscale auth key configured by your admin.</p>
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-sm font-semibold text-gray-900">Platform key</span>
+              <span class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary font-medium border border-primary/20">Recommended</span>
+            </div>
+            <p class="text-xs text-gray-500 leading-relaxed">Use the platform-level Tailscale auth key configured by your admin.</p>
           </div>
         </label>
 
@@ -159,12 +143,8 @@
       </div>
 
       <div class="border-t border-gray-100 pt-4">
-        <button
-          onclick={savePrefs}
-          disabled={savingPrefs}
-          class="btn-primary"
-        >
-          {savingPrefs ? 'Saving…' : 'Save Preferences'}
+        <button onclick={saveTailscaleMode} disabled={savingTailscale} class="btn-primary">
+          {savingTailscale ? 'Saving…' : 'Save'}
         </button>
       </div>
     </div>

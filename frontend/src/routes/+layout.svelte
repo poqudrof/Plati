@@ -21,8 +21,9 @@
         if (!setup_completed) {
           if (window.location.pathname !== '/setup') {
             goto('/setup');
+          } else {
+            isLoading.set(false);
           }
-          isLoading.set(false);
           return;
         }
         // Setup done — normal auth flow

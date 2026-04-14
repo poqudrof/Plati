@@ -234,6 +234,22 @@ func (h *AdminHandler) GetDebugInstance(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, inst)
 }
 
+// CheckTemplateProfiles checks whether every Incus profile required by the template
+// exists on all registered servers.
+func (h *AdminHandler) CheckTemplateProfiles(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid template id")
+		return
+	}
+	results, err := h.instanceSvc.CheckTemplateProfiles(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
 // ExecCommand runs a shell command inside a running instance (admin only).
 func (h *AdminHandler) ExecCommand(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r, "id")

@@ -119,11 +119,27 @@ func (h *SetupHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		if maxInst == 0 {
 			maxInst = 50
 		}
+		tlsCert := req.Server.TLSClientCert
+		tlsKey := req.Server.TLSClientKey
+		// Preserve existing TLS certs if none were submitted
+		if tlsCert == "" || tlsKey == "" {
+			for _, existing := range h.cfg.Servers {
+				if existing.Name == req.Server.Name {
+					if tlsCert == "" {
+						tlsCert = existing.TLSClientCert
+					}
+					if tlsKey == "" {
+						tlsKey = existing.TLSClientKey
+					}
+					break
+				}
+			}
+		}
 		newCfg.Servers = []config.IncusServer{{
 			Name:          req.Server.Name,
 			Endpoint:      req.Server.Endpoint,
-			TLSClientCert: req.Server.TLSClientCert,
-			TLSClientKey:  req.Server.TLSClientKey,
+			TLSClientCert: tlsCert,
+			TLSClientKey:  tlsKey,
 			MaxInstances:  maxInst,
 		}}
 	} else {

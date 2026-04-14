@@ -1487,6 +1487,54 @@ func (s *InstanceService) selectServer() (*models.Server, error) {
 	return nil, fmt.Errorf("no server with available capacity")
 }
 
+// ProfileCheck reports whether a single Incus profile exists on a given server.
+type ProfileCheck struct {
+	Profile string `json:"profile"`
+	Server  string `json:"server"`
+	Exists  bool   `json:"exists"`
+}
+
+// CheckTemplateProfiles returns, for every server, whether each profile required
+// by the template is present on that Incus server.
+func (s *InstanceService) CheckTemplateProfiles(templateID int64) ([]ProfileCheck, error) {
+	tmpl, err := queries.GetTemplate(s.db, templateID)
+	if err != nil {
+		return nil, fmt.Errorf("template not found: %w", err)
+	}
+
+	var profiles []string
+	json.Unmarshal([]byte(tmpl.Profiles), &profiles)
+
+	servers, err := queries.ListServers(s.db)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []ProfileCheck
+	for _, srv := range servers {
+		client, err := s.pool.GetClient(srv.Name)
+		if err != nil {
+			continue
+		}
+		existing, err := client.GetProfileNames()
+		if err != nil {
+			continue
+		}
+		existingSet := make(map[string]bool, len(existing))
+		for _, p := range existing {
+			existingSet[p] = true
+		}
+		for _, p := range profiles {
+			results = append(results, ProfileCheck{
+				Profile: p,
+				Server:  srv.Name,
+				Exists:  existingSet[p],
+			})
+		}
+	}
+	return results, nil
+}
+
 func sanitizeName(name string) string {
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, " ", "-")

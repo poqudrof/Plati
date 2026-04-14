@@ -20,20 +20,22 @@ type Client struct {
 }
 
 func NewClient(name, endpoint, certPath, keyPath string) (*Client, error) {
-	certPEM, err := os.ReadFile(certPath)
-	if err != nil {
-		return nil, fmt.Errorf("read client cert %s: %w", certPath, err)
-	}
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		return nil, fmt.Errorf("read client key %s: %w", keyPath, err)
-	}
-
 	args := &incusclient.ConnectionArgs{
-		TLSClientCert:      string(certPEM),
-		TLSClientKey:       string(keyPEM),
 		InsecureSkipVerify: true,
 		SkipGetServer:      true,
+	}
+
+	if certPath != "" && keyPath != "" {
+		certPEM, err := os.ReadFile(certPath)
+		if err != nil {
+			return nil, fmt.Errorf("read client cert %s: %w", certPath, err)
+		}
+		keyPEM, err := os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("read client key %s: %w", keyPath, err)
+		}
+		args.TLSClientCert = string(certPEM)
+		args.TLSClientKey = string(keyPEM)
 	}
 
 	server, err := incusclient.ConnectIncus(endpoint, args)
@@ -390,6 +392,14 @@ func (c *Client) GetServerResources() (*incusapi.Resources, error) {
 		return nil, fmt.Errorf("get server resources: %w", err)
 	}
 	return resources, nil
+}
+
+func (c *Client) GetProfileNames() ([]string, error) {
+	names, err := c.server.GetProfileNames()
+	if err != nil {
+		return nil, fmt.Errorf("get profile names: %w", err)
+	}
+	return names, nil
 }
 
 // ListDirectory lists files/directories at the given path inside the instance.

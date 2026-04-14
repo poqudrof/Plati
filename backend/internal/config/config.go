@@ -28,6 +28,7 @@ type AuthConfig struct {
 	EntraClientID     string `mapstructure:"entra_client_id" yaml:"entra_client_id"`
 	EntraClientSecret string `mapstructure:"entra_client_secret" yaml:"entra_client_secret"`
 	EntraTenantID     string `mapstructure:"entra_tenant_id" yaml:"entra_tenant_id"`
+	EntraRedirectURI  string `mapstructure:"entra_redirect_uri" yaml:"entra_redirect_uri"`
 	AdminPasswordHash string `mapstructure:"admin_password_hash" yaml:"admin_password_hash"`
 	JWTSecret         string `mapstructure:"jwt_secret" yaml:"jwt_secret"`
 	JWTLifetimeHours  int    `mapstructure:"jwt_lifetime_hours" yaml:"jwt_lifetime_hours"`

@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { admin, templates as templatesApi, instances as instancesApi } from '$lib/api';
   import Terminal from '$lib/components/Terminal.svelte';
-  import type { Template, Instance, MixinInfo, TailscaleServeResult } from '$lib/api/types';
+  import type { Template, Instance, MixinInfo, TailscaleServeResult, ProfileCheck } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@
   let debugInstance: Instance | null = $state(null);
   let availableMixins: MixinInfo[] = $state([]);
   let loading = $state(true);
+  let profileChecks = $state<ProfileCheck[]>([]);
 
   let activeSection: 'instance' | 'runner' | 'editor' = $state('instance');
 
@@ -58,13 +59,15 @@
   async function load() {
     loading = true;
     try {
-      const [tmpl, mixins] = await Promise.all([
+      const [tmpl, mixins, checks] = await Promise.all([
         templatesApi.get(templateId),
-        admin.templates.listMixins()
+        admin.templates.listMixins(),
+        admin.templates.checkProfiles(templateId)
       ]);
       template = tmpl;
       editingTemplate = { ...tmpl };
       availableMixins = mixins;
+      profileChecks = checks ?? [];
       try { persistenceDirs = JSON.parse(tmpl.persistence_dirs || '[]'); } catch { persistenceDirs = []; }
       try {
         debugInstance = await admin.templates.getDebugInstance(templateId);
@@ -320,6 +323,25 @@
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
     </div>
   {:else}
+    <!-- Profile warnings -->
+    {#if profileChecks.some(c => !c.exists)}
+      <div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+        <p class="font-semibold text-amber-800 mb-2">Missing Incus profiles</p>
+        <ul class="space-y-1 text-sm text-amber-700">
+          {#each profileChecks.filter(c => !c.exists) as check}
+            <li>
+              Profile <code class="font-mono bg-amber-100 px-1 rounded">{check.profile}</code>
+              does not exist on server <strong>{check.server}</strong>.
+            </li>
+          {/each}
+        </ul>
+        <p class="mt-3 text-xs text-amber-600">
+          Run <code class="font-mono bg-amber-100 px-1 rounded">bash scripts/setup-docker-profile.sh</code> on the server to create the <code class="font-mono bg-amber-100 px-1 rounded">docker</code> profile,
+          or remove it from the template's <em>Profiles</em> list if Docker-in-Docker is not needed.
+        </p>
+      </div>
+    {/if}
+
     <!-- Tab bar -->
     <div class="flex space-x-4 mb-6 border-b">
       <button

@@ -56,11 +56,21 @@ func main() {
 	}
 
 	// Setup Incus pool
+	configDir := filepath.Dir(*configPath)
 	pool := incus.NewPool()
 	var serverModels []models.Server
 	for _, srv := range cfg.Servers {
+		// Resolve cert paths relative to config file directory
+		certPath := srv.TLSClientCert
+		if certPath != "" && !filepath.IsAbs(certPath) {
+			certPath = filepath.Join(configDir, certPath)
+		}
+		keyPath := srv.TLSClientKey
+		if keyPath != "" && !filepath.IsAbs(keyPath) {
+			keyPath = filepath.Join(configDir, keyPath)
+		}
 		log.Printf("[%.1fs] connecting to Incus server %s (%s)...", time.Since(start).Seconds(), srv.Name, srv.Endpoint)
-		if err := pool.AddServer(srv.Name, srv.Endpoint, srv.TLSClientCert, srv.TLSClientKey); err != nil {
+		if err := pool.AddServer(srv.Name, srv.Endpoint, certPath, keyPath); err != nil {
 			log.Printf("[%.1fs] warning: failed to connect to Incus server %s: %v", time.Since(start).Seconds(), srv.Name, err)
 		} else {
 			log.Printf("[%.1fs] connected to Incus server %s", time.Since(start).Seconds(), srv.Name)
@@ -68,8 +78,8 @@ func main() {
 		serverModels = append(serverModels, models.Server{
 			Name:         srv.Name,
 			Endpoint:     srv.Endpoint,
-			TLSCertPath:  srv.TLSClientCert,
-			TLSKeyPath:   srv.TLSClientKey,
+			TLSCertPath:  certPath,
+			TLSKeyPath:   keyPath,
 			MaxInstances: srv.MaxInstances,
 		})
 	}
@@ -77,9 +87,12 @@ func main() {
 	// Setup Entra auth (optional)
 	var entraAuth *auth.EntraAuth
 	if cfg.Auth.EntraClientID != "" {
-		redirectURL := fmt.Sprintf("http://%s:%d/auth/callback", cfg.Server.Host, cfg.Server.Port)
-		if cfg.Server.Host == "0.0.0.0" {
-			redirectURL = fmt.Sprintf("http://localhost:%d/auth/callback", cfg.Server.Port)
+		redirectURL := cfg.Auth.EntraRedirectURI
+		if redirectURL == "" {
+			redirectURL = fmt.Sprintf("http://%s:%d/auth/callback", cfg.Server.Host, cfg.Server.Port)
+			if cfg.Server.Host == "0.0.0.0" {
+				redirectURL = fmt.Sprintf("http://localhost:%d/auth/callback", cfg.Server.Port)
+			}
 		}
 		log.Printf("[%.1fs] fetching Entra OIDC configuration...", time.Since(start).Seconds())
 		entraAuth, err = auth.NewEntraAuth(context.Background(), cfg.Auth.EntraClientID, cfg.Auth.EntraClientSecret, cfg.Auth.EntraTenantID, redirectURL)
@@ -91,12 +104,12 @@ func main() {
 	}
 
 	// Keys directory: {config_dir}/ssh_keys/
-	keysDir := filepath.Join(filepath.Dir(*configPath), "ssh_keys")
+	keysDir := filepath.Join(configDir, "ssh_keys")
 
 	// Repos directory: {config_dir}/repos/ (or configured path)
 	reposDir := cfg.ReposDir
 	if reposDir != "" && !filepath.IsAbs(reposDir) {
-		reposDir = filepath.Join(filepath.Dir(*configPath), reposDir)
+		reposDir = filepath.Join(configDir, reposDir)
 	}
 	if reposDir != "" {
 		if err := os.MkdirAll(reposDir, 0755); err != nil {
@@ -107,7 +120,7 @@ func main() {
 	// Resolve templates directory (relative to config file location)
 	templatesDir := cfg.TemplatesDir
 	if templatesDir != "" && !filepath.IsAbs(templatesDir) {
-		templatesDir = filepath.Join(filepath.Dir(*configPath), templatesDir)
+		templatesDir = filepath.Join(configDir, templatesDir)
 	}
 
 	// Init services

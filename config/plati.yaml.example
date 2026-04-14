@@ -11,6 +11,8 @@ auth:
   entra_client_id: ""
   entra_client_secret: ""
   entra_tenant_id: ""
+  # Override the OIDC redirect URI when behind a reverse proxy
+  # entra_redirect_uri: "https://plati.example.com/auth/callback"
 
   # Admin local login - generate hash with: htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
   admin_password_hash: ""
@@ -38,4 +40,4 @@ servers:
 sleep_timeout: "4h"
 
 # Templates directory for JSON import
-templates_dir: "config/templates"
+templates_dir: "templates"

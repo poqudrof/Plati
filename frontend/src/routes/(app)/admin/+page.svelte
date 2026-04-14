@@ -48,6 +48,18 @@
   }
 
   // Template actions
+  async function duplicateTemplate(tmpl: Template) {
+    const newName = prompt('New template name:', tmpl.name + ' (copy)');
+    if (!newName) return;
+    const newSlug = prompt('New template slug:', tmpl.slug + '-copy');
+    if (!newSlug) return;
+    try {
+      await admin.templates.duplicate(tmpl.id, newName, newSlug);
+      await loadTemplates();
+      addNotification('success', 'Template duplicated');
+    } catch (e: any) { addNotification('error', 'Failed to duplicate template: ' + e.message); }
+  }
+
   async function deleteTemplate(id: number) {
     if (!confirm('Delete this template?')) return;
     try {
@@ -374,6 +386,7 @@
               <button onclick={() => expandedTemplate = expandedTemplate === tmpl.id ? null : tmpl.id} class="text-gray-500 hover:text-gray-700 text-sm">
                 {expandedTemplate === tmpl.id ? 'Collapse' : 'Details'}
               </button>
+              <button onclick={() => duplicateTemplate(tmpl)} class="text-blue-600 hover:text-blue-800 text-sm">Duplicate</button>
               <a href="/admin/templates/{tmpl.id}/debug" class="text-purple-600 hover:text-purple-800 text-sm">Debug</a>
               <a href="/admin/templates/{tmpl.id}" class="text-primary hover:text-primary-dark text-sm">Edit</a>
             </div>

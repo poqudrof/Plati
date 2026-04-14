@@ -101,13 +101,16 @@ func SetManagedKeyUsers(db *sqlx.DB, keyID int64, userIDs []int64) error {
 	return tx.Commit()
 }
 
-// GetManagedKeysForUser returns all managed keys assigned to a user (includes encrypted private key for injection).
+// GetManagedKeysForUser returns managed keys available to a user for injection.
+// A key is available if it is explicitly assigned to the user OR if it has no
+// assignments at all (treated as a global/shared key available to everyone).
 func GetManagedKeysForUser(db *sqlx.DB, userID int64) ([]models.ManagedSSHKey, error) {
 	keys := []models.ManagedSSHKey{}
 	err := db.Select(&keys, `
-		SELECT mk.* FROM managed_ssh_keys mk
-		JOIN managed_key_assignments mka ON mka.managed_key_id = mk.id
+		SELECT DISTINCT mk.* FROM managed_ssh_keys mk
+		LEFT JOIN managed_key_assignments mka ON mka.managed_key_id = mk.id
 		WHERE mka.user_id = ?
+		   OR mk.id NOT IN (SELECT managed_key_id FROM managed_key_assignments)
 	`, userID)
 	return keys, err
 }

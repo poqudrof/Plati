@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo } from './types';
+import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck } from './types';
 
 // Setup
 export const setup = {
@@ -108,7 +108,8 @@ export const admin = {
     updateFromYAML: (id: number, yaml: string) => api.post<Template>(`/api/v1/admin/templates/${id}/update-from-yaml`, { yaml }),
     getDebugInstance: (id: number) => api.get<Instance>(`/api/v1/admin/templates/${id}/debug/instance`),
     saveToDisk: (id: number) => api.post<{ message: string }>(`/api/v1/admin/templates/${id}/save-to-disk`),
-    reloadFromDisk: (id: number) => api.post<Template>(`/api/v1/admin/templates/${id}/reload-from-disk`, {})
+    reloadFromDisk: (id: number) => api.post<Template>(`/api/v1/admin/templates/${id}/reload-from-disk`, {}),
+    checkProfiles: (id: number) => api.get<ProfileCheck[]>(`/api/v1/admin/templates/${id}/profiles/check`)
   },
   servers: {
     list: () => api.get<Server[]>('/api/v1/admin/servers')
