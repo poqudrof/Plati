@@ -1,0 +1,21 @@
+name: QCM avec IA
+slug: qcm-poc-formation
+description: AI State of the Art public site (catie-aq)
+image: images:ubuntu/24.04/cloud
+profiles:
+    - default
+resources:
+    cpu: 2
+    disk: 20GB
+    memory: 4GB
+terminal_user: ubuntu
+rebuild_commands:
+    - cd /workspace/AI-state-art-public && git pull --ff-only || true
+persistence:
+    mode: normal
+    directories:
+        - path: /workspace
+          size: 20GB
+repos:
+    - name: AI-state-art-public
+      dest: /workspace/AI-state-art-public
