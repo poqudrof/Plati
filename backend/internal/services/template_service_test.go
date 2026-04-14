@@ -33,7 +33,7 @@ post_create_commands:
 		t.Fatal(err)
 	}
 
-	s := NewTemplateService(nil)
+	s := NewTemplateService(nil, "")
 	if err := s.LoadMixinsFromDir(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ post_create_commands:
 		t.Fatal(err)
 	}
 
-	s := NewTemplateService(nil)
+	s := NewTemplateService(nil, "")
 	if err := s.LoadMixinsFromDir(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ post_create_commands:
 		t.Fatal(err)
 	}
 
-	s := NewTemplateService(nil)
+	s := NewTemplateService(nil, "")
 	if err := s.LoadMixinsFromDir(dir); err != nil {
 		t.Fatal(err)
 	}

@@ -338,8 +338,18 @@ func (s *RepoService) gitPull(id int64) {
 
 // nameFromSSHURL derives a short name from a git SSH URL.
 // "git@github.com:org/repo.git" → "repo"
-// Returns an error if the derived name is empty or contains unsafe characters.
+// Returns an error if the URL contains path-traversal sequences or if the
+// derived name is empty or contains unsafe characters.
 func nameFromSSHURL(url string) (string, error) {
+	// Reject any URL that contains ".." path-traversal sequences before
+	// extracting the final path component. This prevents URLs like
+	// "git@github.com:org/../../../etc/evil" from resolving to a safe-looking name.
+	for _, seg := range strings.FieldsFunc(url, func(r rune) bool { return r == '/' || r == ':' }) {
+		if seg == ".." {
+			return "", fmt.Errorf("SSH URL %q contains path traversal", url)
+		}
+	}
+
 	url = strings.TrimSuffix(url, ".git")
 	name := url
 	for i := len(url) - 1; i >= 0; i-- {

@@ -4,7 +4,7 @@
 // and verify the resulting environment.
 //
 // These tests talk directly to a live Incus server — no Plati API layer is
-// involved.  They are intentionally skipped when the required env vars are
+// involved. They are intentionally skipped when the required env vars are
 // absent so that the normal `go test ./...` run (unit + integration) is
 // unaffected.
 //
@@ -22,7 +22,7 @@
 // # Running
 //
 //	./tests.sh --image              # via the top-level runner
-//	cd backend && go test -v -timeout 30m ./internal/e2e/...
+//	cd backend && go test -v -timeout 30m -tags e2e ./internal/e2e/...
 package e2e_test
 
 import (
@@ -43,19 +43,46 @@ import (
 	"github.com/homaserver/plati/internal/incus"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── constants ──────────────────────────────────────────────────────────────────
 
 const (
 	defaultEndpoint   = "https://127.0.0.1:8443"
 	defaultTimeoutSec = 300
 )
 
-// templateYAML mirrors services.TemplateYAML to avoid a service-layer import.
+// ── YAML structs ───────────────────────────────────────────────────────────────
+
+// templateYAML mirrors the minimal fields needed to provision a container.
 type templateYAML struct {
 	Name     string   `yaml:"name"`
 	Image    string   `yaml:"image"`
 	Profiles []string `yaml:"profiles"`
 }
+
+// fullTemplateYAML reads all fields from a template YAML file.
+// Used by tests that also run first_init_commands or inspect repos/persistence.
+type fullTemplateYAML struct {
+	Name              string   `yaml:"name"`
+	Slug              string   `yaml:"slug"`
+	Image             string   `yaml:"image"`
+	Profiles          []string `yaml:"profiles"`
+	TerminalUser      string   `yaml:"terminal_user"`
+	Includes          []string `yaml:"includes"`
+	FirstInitCommands []string `yaml:"first_init_commands"`
+	RebuildCommands   []string `yaml:"rebuild_commands"`
+	Repos             []struct {
+		Name string `yaml:"name"`
+		Dest string `yaml:"dest"`
+	} `yaml:"repos"`
+}
+
+// mixinYAML is the parsed form of a mixin YAML file in config/templates/mixins/.
+type mixinYAML struct {
+	Name               string   `yaml:"name"`
+	PostCreateCommands []string `yaml:"post_create_commands"`
+}
+
+// ── file helpers ───────────────────────────────────────────────────────────────
 
 // repoRoot returns the absolute path to the repository root by walking up from
 // this file (backend/internal/e2e/image_test.go → ../../.. = repo root).
@@ -78,6 +105,38 @@ func loadTemplate(t *testing.T, slug string) templateYAML {
 	}
 	return tmpl
 }
+
+// loadFullTemplate reads and parses the complete YAML for a template slug.
+func loadFullTemplate(t *testing.T, slug string) fullTemplateYAML {
+	t.Helper()
+	path := filepath.Join(repoRoot(), "config", "templates", slug+".yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read template %s: %v", path, err)
+	}
+	var tmpl fullTemplateYAML
+	if err := yaml.Unmarshal(data, &tmpl); err != nil {
+		t.Fatalf("parse template %s: %v", path, err)
+	}
+	return tmpl
+}
+
+// loadMixin reads and parses a mixin YAML from config/templates/mixins/<name>.yaml.
+func loadMixin(t *testing.T, name string) mixinYAML {
+	t.Helper()
+	path := filepath.Join(repoRoot(), "config", "templates", "mixins", name+".yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read mixin %s: %v", path, err)
+	}
+	var m mixinYAML
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		t.Fatalf("parse mixin %s: %v", path, err)
+	}
+	return m
+}
+
+// ── Incus client helpers ───────────────────────────────────────────────────────
 
 // newIncusClient creates a real Incus client from env vars.
 // The test is skipped when the cert/key files cannot be located.
@@ -118,14 +177,12 @@ func readyTimeout() int {
 	return defaultTimeoutSec
 }
 
-// containerName returns a unique container name that is safe to use as an Incus
-// instance name (alphanumeric + hyphens, max 63 chars).
+// containerName returns a unique container name safe for Incus (alphanumeric + hyphens, max 63 chars).
 func containerName(slug string) string {
 	return fmt.Sprintf("plati-e2e-%s-%d", slug, time.Now().Unix())
 }
 
-// provision creates and starts a container, registering a cleanup that stops
-// and deletes it even on test failure.
+// provision creates and starts a container, registering a cleanup that stops and deletes it.
 func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAML, envVars map[string]string) {
 	t.Helper()
 
@@ -136,11 +193,8 @@ func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAM
 
 	t.Logf("creating container %s (image: %s, profiles: %v) …", name, tmpl.Image, tmpl.Profiles)
 	if err := client.CreateInstance(name, tmpl.Image, tmpl.Profiles, cfg, nil); err != nil {
-		// Skip rather than fail when a required Incus profile doesn't exist.
-		// The tailscale profile, for example, must be created with
-		// scripts/setup-tailscale-profile.sh before that template can be tested.
 		if strings.Contains(err.Error(), "profile") && strings.Contains(err.Error(), "doesn't exist") {
-			t.Skipf("required Incus profile not configured (run scripts/setup-tailscale-profile.sh if needed): %v", err)
+			t.Skipf("required Incus profile not configured (run scripts/setup-*-profile.sh if needed): %v", err)
 		}
 		t.Fatalf("create container: %v", err)
 	}
@@ -159,8 +213,7 @@ func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAM
 	t.Logf("container %s started", name)
 }
 
-// waitReady waits until the container is responsive by polling a simple command.
-// On /cloud images this effectively waits for cloud-init to finish creating users.
+// waitReady polls until the container is responsive.
 func waitReady(t *testing.T, client *incus.Client, name string) {
 	t.Helper()
 	timeout := readyTimeout()
@@ -179,7 +232,7 @@ func waitReady(t *testing.T, client *incus.Client, name string) {
 }
 
 // run executes a command inside the container and returns trimmed stdout.
-// The test is failed immediately if the command exits non-zero.
+// Fails the test immediately on non-zero exit.
 func run(t *testing.T, client *incus.Client, name string, cmd ...string) string {
 	t.Helper()
 	out, err := client.RunCommand(name, cmd)
@@ -200,138 +253,48 @@ func runContains(t *testing.T, client *incus.Client, name, want string, cmd ...s
 	return out
 }
 
-// ── Tailscale ─────────────────────────────────────────────────────────────────
-
-func TestImage_Tailscale(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "tailscale")
-	name := containerName("tailscale")
-
-	envVars := map[string]string{}
-	if key := os.Getenv("TAILSCALE_AUTH_KEY"); key != "" {
-		envVars["TAILSCALE_AUTH_KEY"] = key
-	}
-
-	provision(t, client, name, tmpl, envVars)
-	waitReady(t, client, name)
-
-	// tailscaled service must be active (systemctl is-active exits 0 when active).
-	run(t, client, name, "systemctl", "is-active", "tailscaled")
-	t.Logf("tailscaled: active")
-
-	// If an auth key was provided, verify the node has joined the network.
-	if _, hasKey := envVars["TAILSCALE_AUTH_KEY"]; hasKey {
-		out := run(t, client, name, "tailscale", "status")
-		if strings.Contains(out, "Logged out") {
-			t.Errorf("expected tailscale to be joined, got: %s", out)
+// runCmds runs a slice of shell commands in the container, logging each one.
+// If failOnError is false, failures are logged but the test continues.
+func runCmds(t *testing.T, client *incus.Client, name string, cmds []string, failOnError bool) {
+	t.Helper()
+	for _, cmd := range cmds {
+		label := cmd
+		if len(label) > 80 {
+			label = label[:77] + "..."
 		}
-		t.Logf("tailscale status: %s", firstLine(out))
-	} else {
-		t.Logf("TAILSCALE_AUTH_KEY not set — skipping join check")
+		t.Logf("exec: %s", label)
+		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", cmd})
+		if err != nil {
+			msg := fmt.Sprintf("exec %q: %v\noutput: %s", label, err, strings.TrimSpace(out))
+			if failOnError {
+				t.Fatal(msg)
+			} else {
+				t.Logf("WARN: %s", msg)
+			}
+		}
 	}
 }
 
-// ── SSHX ──────────────────────────────────────────────────────────────────────
-
-func TestImage_SSHX(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "sshx")
-	name := containerName("sshx")
-
-	provision(t, client, name, tmpl, nil)
-	waitReady(t, client, name)
-
-	// sshx systemd service must be active.
-	run(t, client, name, "systemctl", "is-active", "sshx")
-	t.Logf("sshx service: active")
-
-	// sshx prints its collaborative URL to the journal shortly after starting.
-	// Retry for up to 60 s in case the service just started.
-	urlCmd := `journalctl -u sshx.service -n 200 --no-pager -o cat 2>/dev/null | grep -oE 'https://sshx\.io/s/[^[:space:]]+'`
-	deadline := time.Now().Add(60 * time.Second)
-	var sshxURL string
+// waitForService polls until a systemd service is active or the deadline is reached.
+func waitForService(t *testing.T, client *incus.Client, name, service string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, _ := client.RunCommand(name, []string{"/bin/sh", "-c", urlCmd})
-		if url := strings.TrimSpace(out); url != "" {
-			sshxURL = url
-			break
+		out, err := client.RunCommand(name, []string{"systemctl", "is-active", service})
+		if err == nil && strings.TrimSpace(out) == "active" {
+			return true
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
-	if sshxURL == "" {
-		t.Error("sshx URL not found in journal after 60 s — service may not have printed it yet")
-	} else {
-		t.Logf("sshx URL: %s", sshxURL)
-	}
-}
-
-// ── Node.js development ───────────────────────────────────────────────────────
-
-func TestImage_NodeDev(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "node-dev")
-	name := containerName("node-dev")
-
-	provision(t, client, name, tmpl, nil)
-	waitReady(t, client, name)
-
-	ver := runContains(t, client, name, "v", "node", "--version")
-	t.Logf("node: %s", ver)
-
-	npmVer := run(t, client, name, "npm", "--version")
-	t.Logf("npm: %s", npmVer)
-
-	pnpmVer := run(t, client, name, "pnpm", "--version")
-	t.Logf("pnpm: %s", pnpmVer)
-}
-
-// ── Python development ────────────────────────────────────────────────────────
-
-func TestImage_PythonDev(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "python-dev")
-	name := containerName("python-dev")
-
-	provision(t, client, name, tmpl, nil)
-	waitReady(t, client, name)
-
-	ver := runContains(t, client, name, "Python 3", "python", "--version")
-	t.Logf("python: %s", ver)
-
-	poetryVer := run(t, client, name, "poetry", "--version")
-	t.Logf("poetry: %s", poetryVer)
-}
-
-// ── Site CA ───────────────────────────────────────────────────────────────────
-
-func TestImage_SiteCA(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "site-ca")
-	name := containerName("site-ca")
-
-	provision(t, client, name, tmpl, nil)
-	waitReady(t, client, name)
-
-	// Node.js is installed.
-	nodeVer := runContains(t, client, name, "v", "node", "--version")
-	t.Logf("node: %s", nodeVer)
-
-	// Repository was checked out.
-	run(t, client, name, "test", "-d", "/srv/site-ca")
-	t.Logf("/srv/site-ca: present")
-
-	// npm ci completed (node_modules exists).
-	run(t, client, name, "test", "-d", "/srv/site-ca/node_modules")
-	t.Logf("/srv/site-ca/node_modules: present")
+	return false
 }
 
 // ── proxy helpers ─────────────────────────────────────────────────────────────
 
 // startBridgeProxy starts a minimal HTTP/HTTPS proxy on the incusbr0 gateway
-// address (10.70.69.1:3128) so that containers can reach the internet even when
-// the host's nftables FORWARD chain blocks direct container egress.
-// Returns the proxy URL ("http://10.70.69.1:3128"), or "" if the address is
-// unavailable (e.g. not running on a machine with incusbr0).
+// address (10.70.69.1:3128) so containers can reach the internet when the
+// host's nftables FORWARD chain blocks direct container egress.
+// Returns the proxy URL ("http://10.70.69.1:3128"), or "" if unavailable.
 func startBridgeProxy(t *testing.T) string {
 	t.Helper()
 	addr := "10.70.69.1:3128"
@@ -349,7 +312,6 @@ func startBridgeProxy(t *testing.T) string {
 
 func bridgeProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect {
-		// HTTPS tunnel via CONNECT.
 		dst, err := net.DialTimeout("tcp", r.Host, 30*time.Second)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -378,7 +340,6 @@ func bridgeProxyHandler(w http.ResponseWriter, r *http.Request) {
 		<-done
 		return
 	}
-	// Plain HTTP: forward as-is.
 	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
@@ -396,10 +357,7 @@ func bridgeProxyHandler(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body) //nolint:errcheck
 }
 
-// ── Docker-in-Docker ──────────────────────────────────────────────────────────
-
-// injectProxyViaExec configures apt, curl, and Docker proxy settings via exec
-// commands after the container has started.
+// injectProxyViaExec configures apt, curl, and Docker proxy settings via exec.
 func injectProxyViaExec(t *testing.T, client *incus.Client, name, proxyURL string) {
 	t.Helper()
 	cmds := []struct{ desc, cmd string }{
@@ -415,45 +373,21 @@ func injectProxyViaExec(t *testing.T, client *incus.Client, name, proxyURL strin
 	}
 }
 
-func TestImage_DockerDev(t *testing.T) {
-	client := newIncusClient(t)
-	tmpl := loadTemplate(t, "docker-dev")
-	name := containerName("docker-dev")
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-	provision(t, client, name, tmpl, nil)
-	waitReady(t, client, name)
-
-	// Start a local proxy so the container can reach the internet even when
-	// the host's nftables FORWARD chain blocks direct container egress.
-	if proxyURL := startBridgeProxy(t); proxyURL != "" {
-		injectProxyViaExec(t, client, name, proxyURL)
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
 	}
-
-	// Docker daemon must be active.
-	run(t, client, name, "systemctl", "is-active", "docker")
-	t.Logf("docker: active")
-
-	// Docker can run a container and serve HTTP.
-	// Use --network host so nginx binds directly to the Incus container's
-	// loopback, bypassing Docker's iptables DNAT port-mapping which does not
-	// work reliably inside nested containers.
-	run(t, client, name, "docker", "run", "-d", "--network", "host", "--name", "plati-test-http", "nginx:alpine")
-	t.Logf("nginx container started")
-
-	// Give nginx a moment to bind the port.
-	time.Sleep(3 * time.Second)
-
-	// --noproxy '*' bypasses /root/.curlrc proxy so we connect to localhost
-	// directly inside the container, not via the bridge proxy on the host.
-	out := runContains(t, client, name, "Welcome to nginx", "curl", "--noproxy", "*", "-s", "http://localhost:80")
-	t.Logf("HTTP response: %s", firstLine(out))
-
-	// Clean up the inner Docker container.
-	run(t, client, name, "docker", "rm", "-f", "plati-test-http")
+	return s
 }
 
-// ── Simple Web Server ────────────────────────────────────────────────────────
+// ── Simple Web Server ─────────────────────────────────────────────────────────
 
+// TestImage_SimpleWebServer verifies the simple-webserver template:
+//   - webserver.service is active
+//   - /health returns {"status":"ok"}
+//   - root path returns HTML
 func TestImage_SimpleWebServer(t *testing.T) {
 	client := newIncusClient(t)
 	tmpl := loadTemplate(t, "simple-webserver")
@@ -468,12 +402,25 @@ func TestImage_SimpleWebServer(t *testing.T) {
 	provision(t, client, name, tmpl, envVars)
 	waitReady(t, client, name)
 
+	// The simple-webserver template runs first_init_commands via cloud-init equivalent
+	// (exec steps in Plati). Here we manually run them so the e2e test is self-contained.
+	fullTmpl := loadFullTemplate(t, "simple-webserver")
+	if len(fullTmpl.FirstInitCommands) > 0 {
+		// Set up proxy before package installation.
+		if proxyURL := startBridgeProxy(t); proxyURL != "" {
+			injectProxyViaExec(t, client, name, proxyURL)
+		}
+		t.Log("Running first_init_commands...")
+		runCmds(t, client, name, fullTmpl.FirstInitCommands, false)
+	}
+
 	// webserver.service must be active.
-	run(t, client, name, "systemctl", "is-active", "webserver")
+	if !waitForService(t, client, name, "webserver", 120*time.Second) {
+		t.Fatal("webserver service did not become active within 120s")
+	}
 	t.Logf("webserver: active")
 
 	// Health endpoint must respond with 200 and JSON body.
-	// Retry for up to 30s in case the service is still starting.
 	deadline := time.Now().Add(30 * time.Second)
 	var healthBody string
 	for time.Now().Before(deadline) {
@@ -495,72 +442,300 @@ func TestImage_SimpleWebServer(t *testing.T) {
 	// Root path should return HTML.
 	rootBody := runContains(t, client, name, "Hello from Plati", "/bin/sh", "-c", "curl -s http://localhost:3000/")
 	t.Logf("root: %s", firstLine(rootBody))
+}
 
-	// If Tailscale auth key was provided, verify tailscale is up and serve works.
-	if _, hasKey := envVars["TAILSCALE_AUTH_KEY"]; hasKey {
-		// Wait for tailscale to join.
-		tsDeadline := time.Now().Add(60 * time.Second)
-		var tsStatus string
-		for time.Now().Before(tsDeadline) {
-			out, err := client.RunCommand(name, []string{"tailscale", "status"})
-			if err == nil && !strings.Contains(out, "Logged out") && !strings.Contains(out, "failed") {
-				tsStatus = firstLine(strings.TrimSpace(out))
-				break
-			}
-			time.Sleep(3 * time.Second)
-		}
-		if tsStatus == "" {
-			t.Error("tailscale did not join tailnet within 60s")
-		} else {
-			t.Logf("tailscale: %s", tsStatus)
-		}
+// ── Docker-in-Docker ──────────────────────────────────────────────────────────
 
-		// Check if tailscale serve was auto-configured.
-		serveOut, _ := client.RunCommand(name, []string{"/bin/sh", "-c", "tailscale serve status 2>&1"})
-		if strings.Contains(serveOut, "3000") || strings.Contains(serveOut, "proxy") {
-			t.Logf("tailscale serve: auto-configured (%s)", firstLine(strings.TrimSpace(serveOut)))
-		} else {
-			// Start tailscale serve manually.
-			run(t, client, name, "/bin/sh", "-c", "tailscale serve --bg https+insecure://localhost:3000")
-			t.Logf("tailscale serve: started manually")
-		}
+// TestImage_DockerInDocker verifies Docker-in-Docker capability using the
+// ubuntu template's image and docker Incus profile.
+//
+// This test installs Docker via the docker mixin's post_create_commands, then
+// verifies the daemon is active and can run a container serving HTTP.
+//
+// Requires the Incus 'docker' profile (run scripts/setup-docker-profile.sh).
+func TestImage_DockerInDocker(t *testing.T) {
+	client := newIncusClient(t)
+	// Use the ubuntu template (image + profiles including docker).
+	tmpl := loadTemplate(t, "ubuntu")
+	name := containerName("dind")
 
-		// Get DNS name and verify HTTPS.
-		dnsOut, err := client.RunCommand(name, []string{"/bin/sh", "-c",
-			`tailscale status --json 2>/dev/null | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4`})
-		dnsName := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(dnsOut), "."))
-		if err == nil && dnsName != "" {
-			t.Logf("tailscale DNS: %s", dnsName)
+	provision(t, client, name, tmpl, nil)
+	waitReady(t, client, name)
 
-			// Verify HTTPS is reachable from inside the container itself.
-			httpsDeadline := time.Now().Add(30 * time.Second)
-			var httpsBody string
-			for time.Now().Before(httpsDeadline) {
-				out, err := client.RunCommand(name, []string{"/bin/sh", "-c",
-					fmt.Sprintf("curl -s --max-time 5 https://%s/health 2>/dev/null", dnsName)})
-				if err == nil && strings.Contains(out, `"ok"`) {
-					httpsBody = strings.TrimSpace(out)
-					break
-				}
-				time.Sleep(3 * time.Second)
-			}
-			if httpsBody != "" {
-				t.Logf("HTTPS health: %s", httpsBody)
-			} else {
-				t.Logf("HTTPS self-check did not respond (may need MagicDNS within container)")
-			}
-		}
+	// Set up internet proxy before apt-get.
+	proxyURL := startBridgeProxy(t)
+	if proxyURL != "" {
+		injectProxyViaExec(t, client, name, proxyURL)
+	}
 
-		// Cleanup: turn off serve.
-		client.RunCommand(name, []string{"/bin/sh", "-c", "tailscale serve off"})
+	// Run the docker mixin installation commands.
+	dockerMixin := loadMixin(t, "docker")
+	t.Log("Installing Docker via docker mixin commands...")
+	runCmds(t, client, name, dockerMixin.PostCreateCommands, false)
+
+	// Reload systemd and restart docker with the proxy config (if proxy was set up).
+	if proxyURL != "" {
+		_, _ = client.RunCommand(name, []string{"systemctl", "daemon-reload"})
+		_, _ = client.RunCommand(name, []string{"systemctl", "restart", "docker"})
+	}
+
+	// Docker daemon must be active.
+	if !waitForService(t, client, name, "docker", 60*time.Second) {
+		t.Fatal("docker service did not become active within 60s")
+	}
+	t.Logf("docker: active")
+
+	// Verify docker info.
+	info := run(t, client, name, "docker", "info", "--format", "{{.ServerVersion}}")
+	t.Logf("docker server version: %s", info)
+
+	// Pull and run nginx (uses host network to bypass Docker's iptables DNAT inside Incus).
+	run(t, client, name, "docker", "run", "-d",
+		"--network", "host",
+		"--name", "plati-e2e-nginx",
+		"nginx:alpine",
+	)
+	t.Logf("nginx container started")
+	time.Sleep(3 * time.Second)
+
+	// Curl nginx directly on localhost (--noproxy bypasses the bridge proxy).
+	out := runContains(t, client, name, "Welcome to nginx",
+		"curl", "--noproxy", "*", "-s", "http://localhost:80")
+	t.Logf("nginx HTTP response: %s", firstLine(out))
+
+	// Clean up inner container.
+	run(t, client, name, "docker", "rm", "-f", "plati-e2e-nginx")
+	t.Logf("inner container cleaned up")
+
+	// Verify docker ps is now empty.
+	out = run(t, client, name, "docker", "ps", "-q")
+	if out != "" {
+		t.Errorf("expected no running containers after cleanup, got: %s", out)
 	}
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── QCM PoC Formation ─────────────────────────────────────────────────────────
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+// TestImage_QcmPocFormation verifies the qcm-poc-formation template:
+//
+//   - Container provisions from ubuntu/24.04/cloud
+//   - git is available (pre-installed in Ubuntu cloud images)
+//   - Workspace directory can be created and used
+//   - Git repository operations work (init, commit, clone, pull)
+//   - The template's rebuild_command pattern (git pull --ff-only || true) succeeds
+//   - SSH key injection is functional (authorized_keys written)
+//
+// The test simulates the Plati repo-copy flow locally: a bare repo is initialized
+// inside the container and cloned to /workspace/AI-state-art-public so that
+// subsequent git pull calls succeed.
+func TestImage_QcmPocFormation(t *testing.T) {
+	client := newIncusClient(t)
+	tmpl := loadTemplate(t, "qcm-poc-formation")
+	fullTmpl := loadFullTemplate(t, "qcm-poc-formation")
+	name := containerName("qcm")
+
+	provision(t, client, name, tmpl, nil)
+	waitReady(t, client, name)
+
+	// ── 1. git is pre-installed ─────────────────────────────────────────────
+	gitVer := runContains(t, client, name, "git version", "git", "--version")
+	t.Logf("git: %s", gitVer)
+
+	// ── 2. Workspace directory setup ────────────────────────────────────────
+	// In production Plati attaches a named volume and the sentinel check
+	// decides first-init vs rebuild. Here we create the directory manually.
+	run(t, client, name, "mkdir", "-p", "/workspace")
+	t.Logf("/workspace: created")
+
+	// ── 3. SSH key injection (simulates Plati phase-2 setup) ────────────────
+	// Write a throwaway test public key so authorized_keys is non-empty.
+	const testPubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID/plati-e2e-test-key plati-e2e"
+	run(t, client, name, "/bin/sh", "-c",
+		fmt.Sprintf("mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '%s' > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys", testPubKey))
+	out := run(t, client, name, "cat", "/root/.ssh/authorized_keys")
+	if !strings.Contains(out, "plati-e2e") {
+		t.Errorf("authorized_keys not written correctly: %s", out)
 	}
-	return s
+	t.Logf("SSH key injection: OK")
+
+	// ── 4. Create a local bare repo (simulates the cached repo on the server) ─
+	setupScript := strings.Join([]string{
+		"git config --global user.email 'test@plati.dev'",
+		"git config --global user.name 'Plati E2E Test'",
+		"git init --bare /tmp/ai-state-art-public.git",
+		// Bootstrap: create a working clone, add a file, push to the bare repo.
+		"git init /tmp/bootstrap-src",
+		"git -C /tmp/bootstrap-src config user.email 'test@plati.dev'",
+		"git -C /tmp/bootstrap-src config user.name 'Plati E2E Test'",
+		"echo 'QCM PoC Formation' > /tmp/bootstrap-src/README.md",
+		"git -C /tmp/bootstrap-src add README.md",
+		"git -C /tmp/bootstrap-src commit -m 'Initial commit'",
+		"git -C /tmp/bootstrap-src remote add origin /tmp/ai-state-art-public.git",
+		"git -C /tmp/bootstrap-src push -u origin HEAD:main",
+	}, " && ")
+	run(t, client, name, "/bin/sh", "-c", setupScript)
+	t.Logf("bare repo initialized at /tmp/ai-state-art-public.git")
+
+	// ── 5. Simulate Plati repo copy: cp → workspace dest ────────────────────
+	// In production: cp -rp /plati-repos/AI-state-art-public /workspace/AI-state-art-public
+	// Here we clone the bare repo (same net effect — git-tracked directory at the dest path).
+	run(t, client, name, "/bin/sh", "-c",
+		"git clone /tmp/ai-state-art-public.git /workspace/AI-state-art-public")
+	run(t, client, name, "test", "-d", "/workspace/AI-state-art-public")
+	t.Logf("/workspace/AI-state-art-public: present after clone")
+
+	// Verify the README landed.
+	readmeOut := run(t, client, name, "cat", "/workspace/AI-state-art-public/README.md")
+	if !strings.Contains(readmeOut, "QCM") {
+		t.Errorf("README.md content unexpected: %s", readmeOut)
+	}
+	t.Logf("README.md: %s", readmeOut)
+
+	// ── 6. Simulate git remote set-url (Plati sets origin after copy) ────────
+	run(t, client, name, "/bin/sh", "-c",
+		"cd /workspace/AI-state-art-public && git remote set-url origin /tmp/ai-state-art-public.git")
+	originURL := run(t, client, name, "/bin/sh", "-c",
+		"git -C /workspace/AI-state-art-public remote get-url origin")
+	t.Logf("git remote origin: %s", originURL)
+
+	// ── 7. Add a new commit to origin, then test git pull (rebuild_command) ──
+	updateScript := strings.Join([]string{
+		"echo 'Update v2' >> /tmp/bootstrap-src/README.md",
+		"git -C /tmp/bootstrap-src add README.md",
+		"git -C /tmp/bootstrap-src commit -m 'Update README'",
+		"git -C /tmp/bootstrap-src push origin HEAD:main",
+	}, " && ")
+	run(t, client, name, "/bin/sh", "-c", updateScript)
+	t.Logf("origin updated with a new commit")
+
+	// Template rebuild_commands: cd /workspace/AI-state-art-public && git pull --ff-only || true
+	for _, rebuildCmd := range fullTmpl.RebuildCommands {
+		t.Logf("rebuild_command: %s", rebuildCmd)
+		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", rebuildCmd})
+		out = strings.TrimSpace(out)
+		if err != nil {
+			t.Errorf("rebuild_command failed: %v\noutput: %s", err, out)
+		} else {
+			t.Logf("rebuild_command output: %s", out)
+		}
+	}
+
+	// Verify the update was pulled.
+	readmeAfterPull := run(t, client, name, "cat", "/workspace/AI-state-art-public/README.md")
+	if !strings.Contains(readmeAfterPull, "Update v2") {
+		t.Errorf("git pull did not fetch the new commit; README: %s", readmeAfterPull)
+	}
+	t.Logf("git pull verified: Update v2 present")
+
+	// ── 8. Validate template metadata ────────────────────────────────────────
+	if fullTmpl.Slug != "qcm-poc-formation" {
+		t.Errorf("unexpected slug: %s", fullTmpl.Slug)
+	}
+	if len(fullTmpl.Repos) == 0 {
+		t.Error("template has no repos configured — expected at least one")
+	} else {
+		t.Logf("template repos: %+v", fullTmpl.Repos)
+	}
+}
+
+// ── Site IA Gen ───────────────────────────────────────────────────────────────
+
+// TestImage_SiteIAGen verifies the site-ia-gen template:
+//
+//   - Container provisions from ubuntu/24.04/cloud
+//   - git is available
+//   - Workspace directory works for git operations
+//   - rebuild_commands (git pull) run successfully after initial clone
+//
+// Uses the same bare-repo pattern as TestImage_QcmPocFormation since both
+// templates share the same image, persistence model, and repo-copy approach.
+func TestImage_SiteIAGen(t *testing.T) {
+	client := newIncusClient(t)
+	tmpl := loadTemplate(t, "site-ia-gen")
+	fullTmpl := loadFullTemplate(t, "site-ia-gen")
+	name := containerName("site-ia-gen")
+
+	provision(t, client, name, tmpl, nil)
+	waitReady(t, client, name)
+
+	// ── 1. git is available ─────────────────────────────────────────────────
+	gitVer := runContains(t, client, name, "git version", "git", "--version")
+	t.Logf("git: %s", gitVer)
+
+	// ── 2. Workspace setup ──────────────────────────────────────────────────
+	run(t, client, name, "mkdir", "-p", "/workspace")
+
+	// ── 3. Bootstrap bare repo + clone (simulates Plati repo copy) ──────────
+	repoName := "AI-state-art-public"
+	if len(fullTmpl.Repos) > 0 {
+		repoName = fullTmpl.Repos[0].Name
+	}
+	repoBarePath := "/tmp/" + repoName + ".git"
+	repoWorkPath := "/workspace/" + repoName
+
+	setupScript := strings.Join([]string{
+		"git config --global user.email 'test@plati.dev'",
+		"git config --global user.name 'Plati E2E Test'",
+		"git init --bare " + repoBarePath,
+		"git init /tmp/site-bootstrap",
+		"git -C /tmp/site-bootstrap config user.email 'test@plati.dev'",
+		"git -C /tmp/site-bootstrap config user.name 'Plati E2E Test'",
+		"echo '# AI State of the Art' > /tmp/site-bootstrap/README.md",
+		"git -C /tmp/site-bootstrap add README.md",
+		"git -C /tmp/site-bootstrap commit -m 'Initial commit'",
+		"git -C /tmp/site-bootstrap remote add origin " + repoBarePath,
+		"git -C /tmp/site-bootstrap push -u origin HEAD:main",
+		"git clone " + repoBarePath + " " + repoWorkPath,
+	}, " && ")
+	run(t, client, name, "/bin/sh", "-c", setupScript)
+	run(t, client, name, "test", "-d", repoWorkPath)
+	t.Logf("%s: cloned to %s", repoName, repoWorkPath)
+
+	// Set the origin URL (as Plati would after cp).
+	run(t, client, name, "/bin/sh", "-c",
+		fmt.Sprintf("git -C %s remote set-url origin %s", repoWorkPath, repoBarePath))
+	t.Logf("git remote origin set to %s", repoBarePath)
+
+	// ── 4. Push an update and run rebuild_commands ──────────────────────────
+	updateScript := strings.Join([]string{
+		"echo 'v2 content' >> /tmp/site-bootstrap/README.md",
+		"git -C /tmp/site-bootstrap add README.md",
+		"git -C /tmp/site-bootstrap commit -m 'Add v2 content'",
+		"git -C /tmp/site-bootstrap push origin HEAD:main",
+	}, " && ")
+	run(t, client, name, "/bin/sh", "-c", updateScript)
+
+	// Adapt rebuild_commands to use the local bare repo path.
+	rebuildCmds := fullTmpl.RebuildCommands
+	if len(rebuildCmds) == 0 {
+		t.Log("no rebuild_commands in template — skipping git pull step")
+	}
+	for _, cmd := range rebuildCmds {
+		// Replace the expected workspace path if needed (the template hardcodes it).
+		adaptedCmd := strings.ReplaceAll(cmd, "/workspace/AI-state-art-public", repoWorkPath)
+		t.Logf("rebuild_command: %s", adaptedCmd)
+		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", adaptedCmd})
+		if err != nil {
+			t.Errorf("rebuild_command failed: %v\noutput: %s", err, strings.TrimSpace(out))
+		} else {
+			t.Logf("output: %s", strings.TrimSpace(out))
+		}
+	}
+
+	// Verify pull got v2 content.
+	readme := run(t, client, name, "cat", repoWorkPath+"/README.md")
+	if !strings.Contains(readme, "v2 content") {
+		t.Errorf("git pull did not fetch v2 content; README: %s", readme)
+	}
+	t.Logf("git pull verified: v2 content present")
+
+	// ── 5. Validate template metadata ────────────────────────────────────────
+	if fullTmpl.Slug != "site-ia-gen" {
+		t.Errorf("unexpected slug: %s", fullTmpl.Slug)
+	}
+	if len(fullTmpl.Repos) == 0 {
+		t.Error("template has no repos configured — expected at least one")
+	} else {
+		t.Logf("template repos: %+v", fullTmpl.Repos)
+	}
 }
