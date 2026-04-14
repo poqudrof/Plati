@@ -44,6 +44,32 @@ incus admin init --minimal
 
 This creates the `default` profile and a `default` storage pool using a directory backend. For ZFS or Btrfs pools, run `incus admin init` interactively instead.
 
+> **Important:** `--minimal` skips network setup. You must create a managed bridge manually (step 4a below) or containers will have no internet access.
+
+## 4a. Set up container networking
+
+`incus admin init --minimal` does not create a network bridge, so containers have no internet access. Create one now:
+
+```bash
+incus network create incusbr0
+incus profile device add default eth0 nic nictype=bridged parent=incusbr0
+```
+
+`incusbr0` is a NAT-enabled bridge — Incus handles masquerading automatically. Also ensure IP forwarding is enabled on the host:
+
+```bash
+echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-incus.conf
+sudo sysctl -p /etc/sysctl.d/99-incus.conf
+```
+
+Verify by launching a test container:
+
+```bash
+incus launch images:ubuntu/24.04/cloud net-test
+incus exec net-test -- ping -c2 1.1.1.1
+incus delete net-test --force
+```
+
 ## 5. Enable the HTTPS listener
 
 Plati connects to Incus over HTTPS with mutual TLS. Enable the listener:
@@ -237,6 +263,48 @@ For remote Incus servers, add additional entries to the `servers` array in `plat
 | `Requested profile "tailscale" doesn't exist` | Run `sudo bash scripts/setup-tailscale-profile.sh` |
 | `Requested profile "nvidia" doesn't exist` | Run `sudo bash scripts/setup-gpu-profile.sh` |
 | `System doesn't have a functional idmap setup` | See **idmap setup** section below |
+| Containers have no internet / `ping: connect: Network is unreachable` | See **container networking** section below |
+
+### container networking
+
+Containers can resolve DNS but get no ping replies (or can't reach the web at all) when the host has no NAT bridge, IP forwarding is disabled, or Docker is also running and has locked down the FORWARD chain.
+
+**Step 1 — verify the bridge and IP forwarding**
+
+```bash
+incus network list                   # should show incusbr0 with TYPE=bridge
+sysctl net.ipv4.ip_forward           # should be 1
+incus profile device show default    # should include an eth0 nic on incusbr0
+```
+
+If anything is missing:
+
+```bash
+incus network create incusbr0 2>/dev/null || true
+incus profile device add default eth0 nic nictype=bridged parent=incusbr0 2>/dev/null || true
+echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-incus.conf
+sudo sysctl -p /etc/sysctl.d/99-incus.conf
+```
+
+**Step 2 — if Docker is also running on the host**
+
+Docker sets the `FORWARD` chain policy to `DROP` and registers its filter chain at the same nftables priority as Incus. This causes Docker's chain to evaluate (and drop) Incus traffic before Incus's own accept rules run.
+
+Fix by inserting accept rules into `DOCKER-USER` — Docker's designated chain for custom rules, evaluated before its drop policy:
+
+```bash
+sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
+sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+```
+
+Persist across reboots:
+
+```bash
+sudo iptables-save > /etc/iptables/iptables.rules
+sudo systemctl enable --now iptables
+```
+
+Existing instances need to be rebuilt or restarted after the profile change to pick up the new network device.
 
 ### idmap setup
 
