@@ -28,9 +28,10 @@ type InstanceService struct {
 	creationLogs *CreationLogManager
 	keysDir      string
 	reposDir     string
+	reposHostDir string // path as seen by the Incus host (may differ from reposDir when running in Docker)
 }
 
-func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, prefSvc *PreferencesService, adminSvc *AdminSettingsService, keysDir string, reposDir string, repoSvc *RepoService, templateSvc *TemplateService) *InstanceService {
+func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, prefSvc *PreferencesService, adminSvc *AdminSettingsService, keysDir string, reposDir string, reposHostDir string, repoSvc *RepoService, templateSvc *TemplateService) *InstanceService {
 	return &InstanceService{
 		db:           db,
 		pool:         pool,
@@ -42,6 +43,7 @@ func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, pre
 		creationLogs: NewCreationLogManager(),
 		keysDir:      keysDir,
 		reposDir:     reposDir,
+		reposHostDir: reposHostDir,
 	}
 }
 
@@ -201,7 +203,7 @@ func (s *InstanceService) attachReposDirAndBuildCmds(client incus.IncusClient, i
 		return nil
 	}
 
-	if err := client.AttachHostPath(incusName, "plati-repos", s.reposDir, "/plati-repos"); err != nil {
+	if err := client.AttachHostPath(incusName, "plati-repos", s.reposHostDir, "/plati-repos"); err != nil {
 		log.Printf("warning: attach repos dir to %s: %v", incusName, err)
 	}
 

@@ -313,7 +313,7 @@ func newHarness(t *testing.T) *harness {
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, "")
 	repoSvc := services.NewRepoService(db, userSvc, "")
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", "", repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
@@ -2020,7 +2020,7 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, "")
 	repoSvc := services.NewRepoService(db, userSvc, reposDir) // real reposDir
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", reposDir, repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", reposDir, reposDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)

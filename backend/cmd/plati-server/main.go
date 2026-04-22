@@ -116,6 +116,11 @@ func main() {
 			log.Printf("warning: create repos dir %s: %v", reposDir, err)
 		}
 	}
+	// reposHostDir is the repos path as seen by the Incus host (may differ when running in Docker).
+	reposHostDir := cfg.ReposHostDir
+	if reposHostDir == "" {
+		reposHostDir = reposDir
+	}
 
 	// Resolve templates directory (relative to config file location)
 	templatesDir := cfg.TemplatesDir
@@ -132,7 +137,7 @@ func main() {
 	prefSvc := services.NewPreferencesService(db)
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	repoSvc := services.NewRepoService(db, userSvc, reposDir)
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, reposHostDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, keysDir)
 
