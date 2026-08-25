@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
-  import type { Template, MixinInfo } from '$lib/api/types';
+  import type { Template, MixinInfo, GitRepo } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
   import CollapsibleSection from '$lib/components/template-editor/CollapsibleSection.svelte';
   import FieldRow from '$lib/components/template-editor/FieldRow.svelte';
@@ -15,6 +15,7 @@
   // --- State ---
   let template: Template | null = $state(null);
   let allMixins: MixinInfo[] = $state([]);
+  let availableRepos: GitRepo[] = $state([]);
   let saving = $state(false);
   let yamlContent = $state('');
   let showYaml = $state(false);
@@ -76,12 +77,14 @@
   async function load() {
     const id = Number($page.params.id);
     try {
-      const [t, m] = await Promise.all([
+      const [t, m, repos] = await Promise.all([
         templatesApi.get(id),
-        admin.templates.listMixins()
+        admin.templates.listMixins(),
+        admin.repos.list()
       ]);
       template = t;
       allMixins = m;
+      availableRepos = repos ?? [];
       loadFromTemplate(t);
     } catch (e: any) {
       addNotification('error', 'Failed to load template: ' + e.message);
@@ -350,7 +353,7 @@
 
       <!-- Repositories -->
       <CollapsibleSection title="Repositories" description="Git repos copied from host cache into the instance on first init">
-        <RepoListEditor bind:repos />
+        <RepoListEditor bind:repos bind:availableRepos />
       </CollapsibleSection>
 
       <!-- Lifecycle Commands -->

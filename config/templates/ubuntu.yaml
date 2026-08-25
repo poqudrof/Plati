@@ -3,30 +3,31 @@ slug: ubuntu
 description: Ubuntu 24.04 LTS dev environment.
 image: images:ubuntu/24.04/cloud
 profiles:
-  - default
-  - docker
+    - default
+    - docker
 resources:
-  cpu: 2
-  memory: 4GB
-  disk: 20GB
-persistence:
-  mode: normal
-  directories:
-    - path: /workspace
-      size: 20GB
+    cpu: 2
+    disk: 20GB
+    memory: 4GB
 terminal_user: ubuntu
 includes:
-  - tailscale
-  - sshx
-  - docker
-  - openvscode-server
+    - tailscale
+    - sshx
+    - docker
+    - openvscode-server
+    - claude-code
 first_init_commands:
-  - apt-get update -y
-  - apt-get install -y git curl wget build-essential openssh-server
-  - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
-  - systemctl enable ssh
-  - systemctl restart ssh
-
+    - apt-get update -y
+    - apt-get install -y git curl wget build-essential openssh-server
+    - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+    - systemctl enable ssh
+    - systemctl restart ssh
+    - usermod -aG docker ubuntu
 rebuild_commands:
-  - systemctl enable ssh
-  - systemctl start ssh
+    - systemctl enable ssh
+    - systemctl start ssh
+persistence:
+    mode: normal
+    directories:
+        - path: /workspace
+          size: 20GB

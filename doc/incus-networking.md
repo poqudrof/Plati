@@ -148,9 +148,15 @@ sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLIS
 **Persist across reboots:**
 
 ```bash
-sudo iptables-save > /etc/iptables/iptables.rules
+sudo sh -c 'iptables-save > /etc/iptables/iptables.rules'
 sudo systemctl enable --now iptables
 ```
+
+> **Important:** Only run `iptables-save` while Docker is running and its chains are
+> intact. If you save when Docker's chains (`DOCKER-FORWARD`, `DOCKER-USER`, etc.)
+> are missing, Docker will fail to create networks on next startup with:
+> `iptables: No chain/target/match by that name`. Fix: `sudo systemctl restart docker`
+> to recreate the chains, re-add the Incus rules above, then re-save.
 
 > **Note:** Restarting the Docker daemon resets its `FORWARD` chain to `policy drop`
 > and re-registers its chains, which can re-break Incus networking. The `DOCKER-USER`
