@@ -315,6 +315,7 @@ func newHarness(t *testing.T) *harness {
 	repoSvc := services.NewRepoService(db, userSvc, "")
 	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", "", repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
+	apiKeySvc := services.NewAPIKeyService(db)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 	setupHandler := handlers.NewSetupHandler(db, cfg, "/dev/null")
@@ -333,6 +334,8 @@ func newHarness(t *testing.T) *harness {
 		PreferencesHandler:   handlers.NewPreferencesHandler(prefSvc),
 		AdminSettingsHandler: handlers.NewAdminSettingsHandler(adminSvc),
 		RepoHandler:          handlers.NewRepoHandler(repoSvc),
+		APIKeyHandler:        handlers.NewAPIKeyHandler(apiKeySvc),
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            jwtSecret,
 		FrontendURL:          "http://localhost",
 	})
@@ -2022,6 +2025,7 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 	repoSvc := services.NewRepoService(db, userSvc, reposDir) // real reposDir
 	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", reposDir, reposDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
+	apiKeySvc := services.NewAPIKeyService(db)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 	setupHandler := handlers.NewSetupHandler(db, cfg, "/dev/null")
@@ -2040,6 +2044,8 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 		PreferencesHandler:   handlers.NewPreferencesHandler(prefSvc),
 		AdminSettingsHandler: handlers.NewAdminSettingsHandler(adminSvc),
 		RepoHandler:          handlers.NewRepoHandler(repoSvc),
+		APIKeyHandler:        handlers.NewAPIKeyHandler(apiKeySvc),
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            jwtSecret,
 		FrontendURL:          "http://localhost",
 	})

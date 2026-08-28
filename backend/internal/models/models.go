@@ -33,6 +33,17 @@ type User struct {
 	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
 }
 
+type APIKey struct {
+	ID         int64      `db:"id" json:"id"`
+	UserID     int64      `db:"user_id" json:"user_id"`
+	Name       string     `db:"name" json:"name"`
+	KeyPrefix  string     `db:"key_prefix" json:"key_prefix"`
+	KeyHash    string     `db:"key_hash" json:"-"`
+	LastUsedAt *time.Time `db:"last_used_at" json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `db:"revoked_at" json:"revoked_at,omitempty"`
+	CreatedAt  time.Time  `db:"created_at" json:"created_at"`
+}
+
 type SSHKey struct {
 	ID        int64     `db:"id" json:"id"`
 	UserID    int64     `db:"user_id" json:"user_id"`

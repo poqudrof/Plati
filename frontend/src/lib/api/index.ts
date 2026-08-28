@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck } from './types';
+import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult } from './types';
 
 // Setup
 export const setup = {
@@ -33,7 +33,11 @@ export const users = {
     api.post<{ id: number }>('/api/v1/secrets', { name, value }),
   updateSecret: (id: number, value: string) =>
     api.put(`/api/v1/secrets/${id}`, { value }),
-  deleteSecret: (id: number) => api.del(`/api/v1/secrets/${id}`)
+  deleteSecret: (id: number) => api.del(`/api/v1/secrets/${id}`),
+  // API keys: view + regenerate own. Only admins can mint a new one — see admin.users.apiKeys.
+  listApiKeys: () => api.get<ApiKey[]>('/api/v1/api-keys'),
+  regenerateApiKey: (id: number) =>
+    api.post<GeneratedApiKeyResult>(`/api/v1/api-keys/${id}/regenerate`)
 };
 
 // Disks (current user)
@@ -128,7 +132,14 @@ export const admin = {
     generateKey: (id: number, name: string) =>
       api.post<AdminGeneratedUserKeyResult>(`/api/v1/admin/users/${id}/keys/generate`, { name }),
     deleteKey: (userId: number, keyId: number) =>
-      api.del(`/api/v1/admin/users/${userId}/keys/${keyId}`)
+      api.del(`/api/v1/admin/users/${userId}/keys/${keyId}`),
+    apiKeys: {
+      list: (userId: number) => api.get<ApiKey[]>(`/api/v1/admin/users/${userId}/api-keys`),
+      create: (userId: number, name: string) =>
+        api.post<GeneratedApiKeyResult>(`/api/v1/admin/users/${userId}/api-keys`, { name }),
+      regenerate: (userId: number, keyId: number) =>
+        api.post<GeneratedApiKeyResult>(`/api/v1/admin/users/${userId}/api-keys/${keyId}/regenerate`)
+    }
   },
   instances: {
     list: () => api.get<Instance[]>('/api/v1/admin/instances'),

@@ -24,6 +24,8 @@ type Deps struct {
 	AdminSettingsHandler *handlers.AdminSettingsHandler
 	RepoHandler          *handlers.RepoHandler
 	StorageHandler       *handlers.StorageHandler
+	APIKeyHandler        *handlers.APIKeyHandler
+	APIKeyAuth           auth.APIKeyAuthenticator
 	JWTSecret            string
 	FrontendURL          string
 }
@@ -53,7 +55,7 @@ func New(deps Deps) *chi.Mux {
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
-		r.Use(auth.AuthMiddleware(deps.JWTSecret))
+		r.Use(auth.AuthMiddleware(deps.JWTSecret, deps.APIKeyAuth))
 
 		r.Get("/auth/me", deps.AuthHandler.Me)
 
@@ -80,6 +82,10 @@ func New(deps Deps) *chi.Mux {
 			r.Post("/secrets", deps.UserHandler.CreateSecret)
 			r.Put("/secrets/{id}", deps.UserHandler.UpdateSecret)
 			r.Delete("/secrets/{id}", deps.UserHandler.DeleteSecret)
+
+			// API keys (view + regenerate own; only admins can create — see /admin/users/{id}/api-keys)
+			r.Get("/api-keys", deps.APIKeyHandler.ListMine)
+			r.Post("/api-keys/{id}/regenerate", deps.APIKeyHandler.RegenerateMine)
 
 			// Disks (user's own volumes)
 			r.Get("/disks", deps.InstanceHandler.ListDisks)
@@ -158,6 +164,11 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/users/{id}/keys", deps.AdminHandler.ListUserKeys)
 				r.Post("/users/{id}/keys/generate", deps.AdminHandler.GenerateUserKey)
 				r.Delete("/users/{id}/keys/{key_id}", deps.AdminHandler.DeleteUserKey)
+
+				// User API key management (admin creates/regenerates on behalf of user)
+				r.Get("/users/{id}/api-keys", deps.APIKeyHandler.AdminList)
+				r.Post("/users/{id}/api-keys", deps.APIKeyHandler.AdminCreate)
+				r.Post("/users/{id}/api-keys/{key_id}/regenerate", deps.APIKeyHandler.AdminRegenerate)
 
 				// Managed SSH Keys
 				r.Get("/managed-keys", deps.ManagedKeyHandler.List)

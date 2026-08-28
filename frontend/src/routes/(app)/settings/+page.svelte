@@ -1,6 +1,7 @@
 <script lang="ts">
   import SSHKeyManager from '$lib/components/SSHKeyManager.svelte';
   import MachineKeysSection from '$lib/components/MachineKeysSection.svelte';
+  import ApiKeysSection from '$lib/components/ApiKeysSection.svelte';
   import { browser } from '$app/environment';
   import { users } from '$lib/api';
   import type { Secret, UserPreferences } from '$lib/api/types';
@@ -84,6 +85,11 @@
   <!-- ─── Access Keys ─────────────────────────────────────────── -->
   <section>
     <SSHKeyManager />
+  </section>
+
+  <!-- ─── API Keys ────────────────────────────────────────────── -->
+  <section>
+    <ApiKeysSection />
   </section>
 
   <!-- ─── Machine Keys ────────────────────────────────────────── -->

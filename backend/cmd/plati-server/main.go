@@ -140,6 +140,7 @@ func main() {
 	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, reposHostDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, keysDir)
+	apiKeySvc := services.NewAPIKeyService(db)
 
 	// Sync servers from config to DB
 	if err := serverSvc.SyncServers(serverModels); err != nil {
@@ -181,6 +182,7 @@ func main() {
 	repoHandler := handlers.NewRepoHandler(repoSvc)
 	storageSvc := services.NewStorageService(db, pool)
 	storageHandler := handlers.NewStorageHandler(storageSvc)
+	apiKeyHandler := handlers.NewAPIKeyHandler(apiKeySvc)
 
 	// Build router
 	r := router.New(router.Deps{
@@ -198,6 +200,8 @@ func main() {
 		AdminSettingsHandler: adminSettingsHandler,
 		RepoHandler:          repoHandler,
 		StorageHandler:       storageHandler,
+		APIKeyHandler:        apiKeyHandler,
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            cfg.Auth.JWTSecret,
 		FrontendURL:          cfg.Server.FrontendURL,
 	})
