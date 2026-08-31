@@ -39,6 +39,12 @@ Thumbs.db
 # TLS client certs
 config/certs/
 
+# Runtime repo cache (cloned repos + known_hosts, created by the repo registry)
+config/repos/
+
+# Test artifacts (ssh-keyscan output dropped by TestSSHGitCloneCapability)
+backend/internal/integration/*.known_hosts
+
 # SSH keys (never commit)
 *.pem
 id_rsa

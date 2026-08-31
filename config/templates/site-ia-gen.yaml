@@ -3,19 +3,31 @@ slug: site-ia-gen
 description: AI State of the Art public site (catie-aq)
 image: images:ubuntu/24.04/cloud
 profiles:
-  - default
+    - default
 resources:
-  cpu: 2
-  memory: 4GB
-  disk: 20GB
-persistence:
-  mode: normal
-  directories:
-    - path: /workspace
-      size: 20GB
+    cpu: 2
+    disk: 20GB
+    memory: 4GB
 terminal_user: ubuntu
-repos:
-  - name: AI-state-art-public
-    dest: /workspace/AI-state-art-public
+includes:
+    - claude-code
+    - docker
+    - openvscode-server
+    - sshx
+    - tailscale
+first_init_commands:
+    - apt-get update -y
+    - apt-get install -y git curl wget build-essential openssh-server
+    - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+    - systemctl enable ssh
+    - systemctl restart ssh
 rebuild_commands:
-  - cd /workspace/AI-state-art-public && git pull --ff-only || true
+    - cd /home/ubuntu/AI-state-art-public && git pull --ff-only || true
+persistence:
+    mode: normal
+    directories:
+        - path: /home/ubuntu
+          size: 20GB
+repos:
+    - name: AI-state-art-public
+      dest: /home/ubuntu/AI-state-art-public

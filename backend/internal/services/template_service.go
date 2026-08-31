@@ -79,8 +79,8 @@ type PersistenceYAML struct {
 }
 
 type RepoRefYAML struct {
-	Name string `yaml:"name"`
-	Dest string `yaml:"dest"`
+	Name string `yaml:"name" json:"name"`
+	Dest string `yaml:"dest" json:"dest"`
 }
 
 type HealthCheckYAML struct {
@@ -336,9 +336,12 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 
 	// Resolve first_init / rebuild commands.
 	firstInitCmds := ty.FirstInitCommands
-	if len(firstInitCmds) == 0 && len(resolvedCmds) > 0 {
-		// Backward compat: post_create_commands treated as first_init_commands.
+	if len(firstInitCmds) == 0 {
+		// Backward compat: mixin + post_create_commands act as first_init.
 		firstInitCmds = resolvedCmds
+	} else if len(resolvedCmds) > 0 {
+		// Prepend mixin commands before the template's own first_init_commands.
+		firstInitCmds = append(resolvedCmds, firstInitCmds...)
 	}
 	firstInitJSON, _ := json.Marshal(firstInitCmds)
 	if string(firstInitJSON) == "null" {

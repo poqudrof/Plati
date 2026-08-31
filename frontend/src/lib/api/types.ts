@@ -40,6 +40,26 @@ export interface AdminGeneratedUserKeyResult {
   created_at: string;
 }
 
+// API key for programmatic access (agents/scripts). The secret itself is
+// never returned except once, right after create/regenerate.
+export interface ApiKey {
+  id: number;
+  user_id: number;
+  name: string;
+  key_prefix: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+}
+
+// Response from create/regenerate — the plaintext key is shown only once.
+export interface GeneratedApiKeyResult {
+  id: number;
+  name: string;
+  key_prefix: string;
+  key: string;
+}
+
 // Admin-managed shared keypair.
 export interface ManagedSSHKey {
   id: number;

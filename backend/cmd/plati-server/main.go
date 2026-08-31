@@ -116,6 +116,11 @@ func main() {
 			log.Printf("warning: create repos dir %s: %v", reposDir, err)
 		}
 	}
+	// reposHostDir is the repos path as seen by the Incus host (may differ when running in Docker).
+	reposHostDir := cfg.ReposHostDir
+	if reposHostDir == "" {
+		reposHostDir = reposDir
+	}
 
 	// Resolve templates directory (relative to config file location)
 	templatesDir := cfg.TemplatesDir
@@ -132,9 +137,10 @@ func main() {
 	prefSvc := services.NewPreferencesService(db)
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	repoSvc := services.NewRepoService(db, userSvc, reposDir)
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, keysDir, reposDir, reposHostDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, keysDir)
+	apiKeySvc := services.NewAPIKeyService(db)
 
 	// Sync servers from config to DB
 	if err := serverSvc.SyncServers(serverModels); err != nil {
@@ -176,6 +182,7 @@ func main() {
 	repoHandler := handlers.NewRepoHandler(repoSvc)
 	storageSvc := services.NewStorageService(db, pool)
 	storageHandler := handlers.NewStorageHandler(storageSvc)
+	apiKeyHandler := handlers.NewAPIKeyHandler(apiKeySvc)
 
 	// Build router
 	r := router.New(router.Deps{
@@ -193,6 +200,8 @@ func main() {
 		AdminSettingsHandler: adminSettingsHandler,
 		RepoHandler:          repoHandler,
 		StorageHandler:       storageHandler,
+		APIKeyHandler:        apiKeyHandler,
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            cfg.Auth.JWTSecret,
 		FrontendURL:          cfg.Server.FrontendURL,
 	})

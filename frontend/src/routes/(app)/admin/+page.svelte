@@ -1,7 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
-  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult } from '$lib/api/types';
+  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult, ApiKey, GeneratedApiKeyResult } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' | 'repos' = $state('templates');
@@ -36,6 +36,13 @@
   let userKeys: UserSSHKey[] = $state([]);
   let newUserKeyName = $state('');
   let userKeyGenerating = $state(false);
+
+  // Per-user API key management
+  let managingApiKeysForUser: User | null = $state(null);
+  let userApiKeys: ApiKey[] = $state([]);
+  let newApiKeyName = $state('');
+  let apiKeyBusy = $state(false);
+  let generatedApiKey: GeneratedApiKeyResult | null = $state(null);
 
   async function loadTemplates() {
     try { templateList = await templatesApi.list(); } catch (e: any) { addNotification('error', 'Failed to load templates: ' + e.message); }
@@ -229,6 +236,36 @@
       userKeys = await admin.users.listKeys(managingKeysForUser.id);
       addNotification('success', 'Key deleted');
     } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function openApiKeys(user: User) {
+    managingApiKeysForUser = user;
+    newApiKeyName = '';
+    try {
+      userApiKeys = await admin.users.apiKeys.list(user.id);
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function createApiKey() {
+    if (!managingApiKeysForUser || !newApiKeyName.trim()) return;
+    apiKeyBusy = true;
+    try {
+      generatedApiKey = await admin.users.apiKeys.create(managingApiKeysForUser.id, newApiKeyName.trim());
+      newApiKeyName = '';
+      userApiKeys = await admin.users.apiKeys.list(managingApiKeysForUser.id);
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { apiKeyBusy = false; }
+  }
+
+  async function regenerateApiKey(keyId: number) {
+    if (!managingApiKeysForUser) return;
+    if (!confirm('Regenerate this key? The old key will stop working immediately.')) return;
+    apiKeyBusy = true;
+    try {
+      generatedApiKey = await admin.users.apiKeys.regenerate(managingApiKeysForUser.id, keyId);
+      userApiKeys = await admin.users.apiKeys.list(managingApiKeysForUser.id);
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { apiKeyBusy = false; }
   }
 
   function copyText(text: string, label: string) {
@@ -630,6 +667,7 @@
               <td class="px-4 py-3 text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString()}</td>
               <td class="px-4 py-3 text-right">
                 <button onclick={() => openUserKeys(user)} class="text-gray-600 hover:text-gray-800 text-sm mr-2">Keys</button>
+                <button onclick={() => openApiKeys(user)} class="text-gray-600 hover:text-gray-800 text-sm mr-2">API Keys</button>
                 <button onclick={() => startEditUser(user)} class="text-primary hover:text-primary-dark text-sm mr-2">Edit</button>
                 <button onclick={() => deleteUser(user)} class="text-red-600 hover:text-red-800 text-sm">Delete</button>
               </td>
@@ -925,6 +963,89 @@
 
         <div class="flex justify-end mt-6 pt-4 border-t">
           <button onclick={() => managingKeysForUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Manage User API Keys Modal -->
+{#if managingApiKeysForUser}
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) managingApiKeysForUser = null; }}>
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-6">
+        <h2 class="text-lg font-bold mb-1">API Keys — {managingApiKeysForUser.email}</h2>
+        <p class="text-sm text-gray-500 mb-4">
+          Used to authenticate scripts/agents against the Plati API (<code class="bg-gray-100 px-1 rounded">Authorization: Bearer &lt;key&gt;</code>).
+          Only admins can create a key; {managingApiKeysForUser.email} can view and regenerate it themselves from their own settings.
+        </p>
+
+        <div class="space-y-3 mb-4">
+          {#each userApiKeys as key}
+            <div class="p-3 bg-gray-50 rounded border">
+              <div class="flex justify-between items-start">
+                <div class="min-w-0 flex-1">
+                  <span class="font-medium text-sm">{key.name}</span>
+                  <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+                  <div class="text-xs text-gray-500 font-mono mt-1">{key.key_prefix}…</div>
+                  {#if key.last_used_at}
+                    <div class="text-xs text-gray-400 mt-1">Last used: {new Date(key.last_used_at).toLocaleString()}</div>
+                  {:else}
+                    <div class="text-xs text-gray-400 mt-1">Never used</div>
+                  {/if}
+                </div>
+                <button
+                  onclick={() => regenerateApiKey(key.id)}
+                  disabled={apiKeyBusy}
+                  class="text-primary hover:text-primary-dark text-sm ml-4 shrink-0 disabled:opacity-50"
+                >Regenerate</button>
+              </div>
+            </div>
+          {/each}
+          {#if userApiKeys.length === 0}
+            <p class="text-sm text-gray-500">No API keys yet.</p>
+          {/if}
+        </div>
+
+        <div class="border-t pt-4 flex gap-3">
+          <input
+            bind:value={newApiKeyName}
+            placeholder="Key name (e.g. admin-agent)"
+            class="flex-1 px-3 py-2 border rounded text-sm"
+            onkeydown={(e) => e.key === 'Enter' && createApiKey()}
+          />
+          <button
+            onclick={createApiKey}
+            disabled={apiKeyBusy || !newApiKeyName.trim()}
+            class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap"
+          >
+            {apiKeyBusy ? 'Working…' : 'Create Key'}
+          </button>
+        </div>
+
+        <div class="flex justify-end mt-6 pt-4 border-t">
+          <button onclick={() => managingApiKeysForUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Generated/regenerated API key reveal modal -->
+{#if generatedApiKey}
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-6">
+        <h2 class="text-lg font-bold mb-1">API key: {generatedApiKey.name}</h2>
+        <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+          Save this now — it won't be shown again. Any script or agent using the previous key (if any) stops working immediately.
+        </p>
+        <div class="flex items-center gap-2">
+          <code class="text-xs bg-gray-100 px-2 py-1 rounded font-mono truncate flex-1">{generatedApiKey.key}</code>
+          <button onclick={() => copyText(generatedApiKey!.key, 'API key')} class="text-xs text-primary hover:underline shrink-0">Copy</button>
+        </div>
+        <div class="flex justify-end mt-6 pt-4 border-t">
+          <button onclick={() => generatedApiKey = null} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Done</button>
         </div>
       </div>
     </div>

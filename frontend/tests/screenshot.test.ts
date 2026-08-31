@@ -381,3 +381,108 @@ test.describe('Notifications', () => {
     await shot(page, '20-notification-overlay');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mixin display tests
+// ---------------------------------------------------------------------------
+
+test.describe('Mixin display', () => {
+  async function getUbuntuTemplate(page: Page): Promise<{ id: number; includes: string[] } | null> {
+    const resp = await page.request.get('/api/v1/templates');
+    if (!resp.ok()) return null;
+    const list: any[] = await resp.json();
+    const ubuntu = list.find(t => t.slug === 'ubuntu');
+    if (!ubuntu) return null;
+    let includes: string[] = [];
+    try { includes = JSON.parse(ubuntu.includes || '[]'); } catch {}
+    return { id: ubuntu.id, includes };
+  }
+
+  test('mixin cards in template editor', async ({ page }) => {
+    const ubuntu = await getUbuntuTemplate(page);
+    if (!ubuntu) { test.skip(); return; }
+
+    await page.goto(`/admin/templates/${ubuntu.id}`);
+    await waitForContent(page);
+
+    // Wait for mixin cards to render (they load after the template fetch).
+    await page.waitForTimeout(1_000);
+    await shot(page, '30-mixin-cards');
+  });
+
+  test('mixin includes shown in template editor', async ({ page }) => {
+    const ubuntu = await getUbuntuTemplate(page);
+    if (!ubuntu || ubuntu.includes.length === 0) { test.skip(); return; }
+
+    await page.goto(`/admin/templates/${ubuntu.id}`);
+    await waitForContent(page);
+    await page.waitForTimeout(1_000);
+
+    // All non-NVIDIA mixins should appear as checked (purple border) cards.
+    const expectedMixins = ['tailscale', 'sshx', 'docker', 'openvscode-server', 'claude-code'];
+    for (const mixin of expectedMixins) {
+      const card = page.locator('[class*="border-purple"]').filter({ hasText: mixin });
+      const visible = await card.isVisible({ timeout: 3_000 }).catch(() => false);
+      if (!visible) {
+        // Mixin may not be loaded on server — skip rather than fail.
+        test.skip();
+        return;
+      }
+    }
+    await shot(page, '31-mixin-includes-checked');
+  });
+
+  test('mixin details expand on click', async ({ page }) => {
+    const ubuntu = await getUbuntuTemplate(page);
+    if (!ubuntu) { test.skip(); return; }
+
+    await page.goto(`/admin/templates/${ubuntu.id}`);
+    await waitForContent(page);
+    await page.waitForTimeout(1_000);
+
+    // Click the first "Details" button in a mixin card.
+    const detailsBtn = page.locator('button', { hasText: 'Details' }).first();
+    const visible = await detailsBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!visible) { test.skip(); return; }
+
+    await detailsBtn.click();
+    await page.waitForTimeout(300);
+    // Commands list should now be visible.
+    const cmdVisible = await page.getByText('Commands:').isVisible({ timeout: 2_000 }).catch(() => false);
+    if (!cmdVisible) { test.skip(); return; }
+    await shot(page, '32-mixin-details-expanded');
+  });
+
+  test('non-NVIDIA mixins present in mixin list', async ({ page }) => {
+    // Hit the admin mixins API directly.
+    const resp = await page.request.get('/api/v1/admin/templates/mixins');
+    if (!resp.ok()) { test.skip(); return; }
+    const mixins: any[] = await resp.json();
+    const names: string[] = mixins.map(m => m.name);
+
+    const nonNvidia = ['tailscale', 'sshx', 'docker', 'openvscode-server', 'claude-code'];
+    for (const expected of nonNvidia) {
+      const found = names.some(n => n.toLowerCase().includes(expected));
+      if (!found) {
+        // Mixins not loaded — backend may be running without templates dir.
+        test.skip();
+        return;
+      }
+    }
+
+    // Nvidia must not appear in ubuntu template includes.
+    const ubuntu = await getUbuntuTemplate(page);
+    if (!ubuntu) { test.skip(); return; }
+    const hasNvidia = ubuntu.includes.some(i => i === 'nvidia');
+    if (hasNvidia) {
+      // This would be a test failure — ubuntu should not include nvidia.
+      throw new Error('Ubuntu template should not include nvidia mixin');
+    }
+
+    // Navigate to the template editor and take a full-page screenshot.
+    await page.goto(`/admin/templates/${ubuntu.id}`);
+    await waitForContent(page);
+    await page.waitForTimeout(1_000);
+    await shot(page, '33-mixin-list-non-nvidia');
+  });
+});

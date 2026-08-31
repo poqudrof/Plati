@@ -9,13 +9,27 @@ resources:
     disk: 20GB
     memory: 4GB
 terminal_user: ubuntu
+includes:
+    - claude-code
+    - openvscode-server
+    - tailscale
+    - docker
+first_init_commands:
+    - cp -rn /etc/skel/. /home/ubuntu/ || true
+    - chown -R ubuntu:ubuntu /home/ubuntu
+    - apt-get update -y
+    - apt-get install -y git curl wget build-essential openssh-server
+    - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+    - systemctl enable ssh
+    - systemctl restart ssh
+    - usermod -aG docker ubuntu
 rebuild_commands:
-    - cd /workspace/AI-state-art-public && git pull --ff-only || true
+    - cd /home/ubuntu/poc-formation && git pull --ff-only || true
 persistence:
     mode: normal
     directories:
-        - path: /workspace
+        - path: /home/ubuntu
           size: 20GB
 repos:
-    - name: AI-state-art-public
-      dest: /workspace/AI-state-art-public
+    - name: poc-formation
+      dest: /home/ubuntu/poc-formation

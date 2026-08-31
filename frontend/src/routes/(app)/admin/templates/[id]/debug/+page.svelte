@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { admin, templates as templatesApi, instances as instancesApi } from '$lib/api';
   import Terminal from '$lib/components/Terminal.svelte';
-  import type { Template, Instance, MixinInfo, TailscaleServeResult, ProfileCheck } from '$lib/api/types';
+  import type { Template, Instance, MixinInfo, TailscaleServeResult, ProfileCheck, GitRepo } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@
   let availableMixins: MixinInfo[] = $state([]);
   let loading = $state(true);
   let profileChecks = $state<ProfileCheck[]>([]);
+  let availableRepos = $state<GitRepo[]>([]);
 
   let activeSection: 'instance' | 'runner' | 'editor' = $state('instance');
 
@@ -53,21 +54,25 @@
   let parsedRepos: { name: string; dest: string }[] = $derived(
     (() => { try { return JSON.parse(editingTemplate?.repos ?? '[]'); } catch { return []; } })()
   );
+  let repoNames = $derived(new Set(availableRepos.map(r => r.name)));
+  let missingRepos = $derived(parsedRepos.filter(r => !repoNames.has(r.name)));
 
   // ── Load ───────────────────────────────────────────────────────────────────
 
   async function load() {
     loading = true;
     try {
-      const [tmpl, mixins, checks] = await Promise.all([
+      const [tmpl, mixins, checks, repos] = await Promise.all([
         templatesApi.get(templateId),
         admin.templates.listMixins(),
-        admin.templates.checkProfiles(templateId)
+        admin.templates.checkProfiles(templateId),
+        admin.repos.list()
       ]);
       template = tmpl;
       editingTemplate = { ...tmpl };
       availableMixins = mixins;
       profileChecks = checks ?? [];
+      availableRepos = repos ?? [];
       try { persistenceDirs = JSON.parse(tmpl.persistence_dirs || '[]'); } catch { persistenceDirs = []; }
       try {
         debugInstance = await admin.templates.getDebugInstance(templateId);
@@ -342,6 +347,24 @@
       </div>
     {/if}
 
+    <!-- Repo warnings -->
+    {#if missingRepos.length > 0}
+      <div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+        <p class="font-semibold text-amber-800 mb-2">Missing repos</p>
+        <ul class="space-y-1 text-sm text-amber-700">
+          {#each missingRepos as ref}
+            <li>
+              Repo <code class="font-mono bg-amber-100 px-1 rounded">{ref.name}</code>
+              is referenced in the template but was not found in <a href="/admin/repos" class="underline font-medium">Admin &rsaquo; Repos</a>.
+            </li>
+          {/each}
+        </ul>
+        <p class="mt-3 text-xs text-amber-600">
+          Add the repo in <a href="/admin/repos" class="underline">Admin &rsaquo; Repos</a> and make sure it has finished cloning, or remove it from this template.
+        </p>
+      </div>
+    {/if}
+
     <!-- Tab bar -->
     <div class="flex space-x-4 mb-6 border-b">
       <button
@@ -535,25 +558,30 @@
           </div>
 
           <!-- Repos -->
-          {#if parsedRepos.length > 0}
-            <div class="bg-white border rounded-lg p-4">
-              <h3 class="font-medium mb-3">Repos</h3>
+          <div class="bg-white border rounded-lg p-4">
+            <h3 class="font-medium mb-3">Repos</h3>
+            {#if parsedRepos.length > 0}
               <div class="space-y-2">
                 {#each parsedRepos as ref}
-                  <div class="flex items-center gap-3 text-sm bg-gray-50 border rounded px-3 py-2">
-                    <a href="/admin/repos" class="font-mono text-primary hover:text-primary-dark hover:underline shrink-0">{ref.name}</a>
-                    <span class="text-gray-400 shrink-0">→</span>
+                  <div class="flex items-center gap-3 text-sm {repoNames.has(ref.name) ? 'bg-gray-50 border' : 'bg-amber-50 border border-amber-300'} rounded px-3 py-2">
+                    <a href="/admin/repos" class="font-mono {repoNames.has(ref.name) ? 'text-primary hover:text-primary-dark' : 'text-amber-700'} hover:underline shrink-0">{ref.name}</a>
+                    {#if !repoNames.has(ref.name)}
+                      <span class="text-amber-600 text-xs font-medium">(not found)</span>
+                    {/if}
+                    <span class="text-gray-400 shrink-0">&rarr;</span>
                     <span class="font-mono text-gray-600 flex-1 truncate">{ref.dest}</span>
                     <button
                       onclick={() => runExec(`[ -d "${ref.dest}" ] && [ "$(ls -A ${ref.dest} 2>/dev/null)" ] && echo "SKIP: ${ref.dest} already exists and is not empty" || cp -rp /plati-repos/${ref.name} ${ref.dest} && echo "Copied ${ref.name} to ${ref.dest}"`)}
-                      disabled={execRunning}
+                      disabled={execRunning || !repoNames.has(ref.name)}
                       class="shrink-0 px-2 py-0.5 bg-teal-600 text-white rounded text-xs hover:bg-teal-700 disabled:opacity-50"
                     >Copy Repo</button>
                   </div>
                 {/each}
               </div>
-            </div>
-          {/if}
+            {:else}
+              <p class="text-sm text-gray-500">No repos configured for this template.</p>
+            {/if}
+          </div>
 
           <!-- first_init_commands -->
           {#if parsedFirstInitCmds.length > 0}

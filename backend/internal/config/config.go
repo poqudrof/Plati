@@ -16,6 +16,11 @@ type Config struct {
 	SleepTimeout        string         `mapstructure:"sleep_timeout" yaml:"sleep_timeout"`
 	TemplatesDir        string         `mapstructure:"templates_dir" yaml:"templates_dir"`
 	ReposDir            string         `mapstructure:"repos_dir" yaml:"repos_dir"`
+	// ReposHostDir, if set, is the path to the repos directory as seen by the Incus host.
+	// Use this when the server runs inside Docker: set repos_dir to the Docker-internal path
+	// (for cloning) and repos_host_dir to the host path (for Incus disk device mounting).
+	// Defaults to repos_dir when empty.
+	ReposHostDir        string         `mapstructure:"repos_host_dir" yaml:"repos_host_dir,omitempty"`
 }
 
 type ServerConfig struct {

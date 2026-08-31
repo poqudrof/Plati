@@ -24,3 +24,4 @@ includes:
 first_init_commands:
   - apt-get update -y
   - apt-get install -y git curl wget build-essential
+  - usermod -aG docker ubuntu

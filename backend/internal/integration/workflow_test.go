@@ -313,8 +313,9 @@ func newHarness(t *testing.T) *harness {
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, "")
 	repoSvc := services.NewRepoService(db, userSvc, "")
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", "", "", repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
+	apiKeySvc := services.NewAPIKeyService(db)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 	setupHandler := handlers.NewSetupHandler(db, cfg, "/dev/null")
@@ -333,6 +334,8 @@ func newHarness(t *testing.T) *harness {
 		PreferencesHandler:   handlers.NewPreferencesHandler(prefSvc),
 		AdminSettingsHandler: handlers.NewAdminSettingsHandler(adminSvc),
 		RepoHandler:          handlers.NewRepoHandler(repoSvc),
+		APIKeyHandler:        handlers.NewAPIKeyHandler(apiKeySvc),
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            jwtSecret,
 		FrontendURL:          "http://localhost",
 	})
@@ -2020,8 +2023,9 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 	adminSvc := services.NewAdminSettingsService(db, userSvc)
 	managedKeySvc := services.NewManagedKeyService(db, userSvc, "")
 	repoSvc := services.NewRepoService(db, userSvc, reposDir) // real reposDir
-	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", reposDir, repoSvc, templateSvc)
+	instanceSvc := services.NewInstanceService(db, pool, userSvc, prefSvc, adminSvc, "", reposDir, reposDir, repoSvc, templateSvc)
 	serverSvc := services.NewServerService(db, pool)
+	apiKeySvc := services.NewAPIKeyService(db)
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 	setupHandler := handlers.NewSetupHandler(db, cfg, "/dev/null")
@@ -2040,6 +2044,8 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 		PreferencesHandler:   handlers.NewPreferencesHandler(prefSvc),
 		AdminSettingsHandler: handlers.NewAdminSettingsHandler(adminSvc),
 		RepoHandler:          handlers.NewRepoHandler(repoSvc),
+		APIKeyHandler:        handlers.NewAPIKeyHandler(apiKeySvc),
+		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            jwtSecret,
 		FrontendURL:          "http://localhost",
 	})
@@ -2383,4 +2389,136 @@ func TestSSHGitCloneCapability(t *testing.T) {
 		t.Errorf("ssh_url mismatch: %q", repos[0]["ssh_url"])
 	}
 	t.Logf("SSH git clone capability test OK")
+}
+
+// TestInstanceWithAllMixins verifies that when an Ubuntu-style template with all
+// non-NVIDIA mixins (tailscale, sshx, docker, openvscode-server, claude-code) is
+// imported and an instance is created, all mixin commands are executed during setup.
+//
+// This test loads the real mixin YAMLs from the project's config/templates directory
+// (path relative to the test package: ../../../config/templates).
+// It is skipped when that directory is not present (e.g. in CI without the full repo).
+func TestInstanceWithAllMixins(t *testing.T) {
+	// Resolve the real templates dir relative to this test package.
+	templatesDir, err := filepath.Abs(filepath.Join("..", "..", "..", "config", "templates"))
+	if err != nil {
+		t.Skipf("cannot resolve templates dir: %v", err)
+	}
+	if _, err := os.Stat(templatesDir); err != nil {
+		t.Skipf("templates dir not found (%s): %v", templatesDir, err)
+	}
+	ubuntuYAML := filepath.Join(templatesDir, "ubuntu.yaml")
+	if _, err := os.Stat(ubuntuYAML); err != nil {
+		t.Skipf("ubuntu.yaml not found: %v", err)
+	}
+
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	// Load real mixins into an auxiliary service that shares the harness DB.
+	// The harness's HTTP handlers use the same DB, so the imported template is visible.
+	auxSvc := services.NewTemplateService(h.db, templatesDir)
+	if err := auxSvc.LoadMixinsFromDir(templatesDir); err != nil {
+		t.Fatalf("load mixins: %v", err)
+	}
+
+	yamlData, err := os.ReadFile(ubuntuYAML)
+	if err != nil {
+		t.Fatalf("read ubuntu.yaml: %v", err)
+	}
+	tmpl, err := auxSvc.ImportYAML(yamlData)
+	if err != nil {
+		t.Fatalf("import ubuntu template: %v", err)
+	}
+	t.Logf("Imported ubuntu template id=%d with includes=%s", tmpl.ID, tmpl.Includes)
+
+	// Verify includes lists all expected non-NVIDIA mixins.
+	var includes []string
+	json.Unmarshal([]byte(tmpl.Includes), &includes)
+	expectedMixins := []string{"tailscale", "sshx", "docker", "openvscode-server", "claude-code"}
+	for _, want := range expectedMixins {
+		found := false
+		for _, got := range includes {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("ubuntu template missing mixin %q in includes", want)
+		}
+	}
+
+	// Verify NVIDIA is NOT in ubuntu includes.
+	for _, inc := range includes {
+		if inc == "nvidia" {
+			t.Error("ubuntu template should NOT include nvidia mixin")
+		}
+	}
+
+	// Verify mixin commands are in first_init_commands.
+	var firstInit []string
+	json.Unmarshal([]byte(tmpl.FirstInitCommands), &firstInit)
+	joined := strings.Join(firstInit, "\n")
+
+	mixinChecks := []struct{ mixin, keyword string }{
+		{"tailscale", "tailscale-install.sh"},
+		{"tailscale", "tailscaled"},
+		{"sshx", "sshx"},
+		{"docker", "docker-ce"},
+		{"openvscode-server", "openvscode-server"},
+		{"claude-code", "claude.ai/install.sh"},
+	}
+	for _, c := range mixinChecks {
+		if !strings.Contains(joined, c.keyword) {
+			t.Errorf("mixin %q: %q not found in first_init_commands", c.mixin, c.keyword)
+		}
+	}
+	// Template-specific commands must also be present.
+	if !strings.Contains(joined, "openssh-server") {
+		t.Error("ubuntu template's own first_init_commands (openssh-server) not found")
+	}
+
+	// Create an instance using this template via the HTTP API.
+	resp := h.do("POST", "/api/v1/instances", map[string]any{
+		"name":        "mixin-test",
+		"template_id": tmpl.ID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create instance: %d — %s", resp.StatusCode, body)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	t.Logf("Instance created: id=%d incus=%s", inst.ID, inst.IncusName)
+
+	// Wait for async setup to complete.
+	waitForInstanceReady(t, h, inst.ID)
+
+	// Assert mixin commands were run via the mock.
+	runChecks := []struct{ mixin, keyword string }{
+		{"tailscale", "tailscale-install.sh"},
+		{"tailscale", "tailscaled"},
+		{"sshx", "sshx"},
+		{"docker", "docker-ce"},
+		{"openvscode-server", "openvscode-server"},
+		{"claude-code", "claude.ai/install.sh"},
+	}
+	for _, c := range runChecks {
+		if !h.mock.hasRunCall(inst.IncusName, c.keyword) {
+			cmds := h.mock.runCallsFor(inst.IncusName)
+			t.Errorf("mixin %q: %q not found in RunCommand calls for %s\ncalls: %v",
+				c.mixin, c.keyword, inst.IncusName, cmds)
+		} else {
+			t.Logf("OK: mixin %q ran %q", c.mixin, c.keyword)
+		}
+	}
+
+	// Template-specific init commands must also have run.
+	if !h.mock.hasRunCall(inst.IncusName, "openssh-server") {
+		t.Error("ubuntu template init commands (openssh-server) not run")
+	}
+
+	t.Logf("Mixin integration test OK: all non-NVIDIA mixin commands executed")
 }
