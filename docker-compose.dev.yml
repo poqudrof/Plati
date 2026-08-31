@@ -1,37 +1,77 @@
-# Dev-only compose — bind-mounted sources, no build steps, no nginx
-# Access: frontend http://localhost:5173  (Vite proxies /api, /auth, /health → backend)
+# Dev — sources bind-montées, aucun build, pas de nginx.
+# Accès : http://127.0.0.1:5300  (Vite proxie /api, /auth, /health → backend)
 #
-# First run: copy config/plati.yaml.example → config/plati.yaml and fill in secrets
-# Usage: docker compose -f docker-compose.dev.yml up
+# Même base que docker-compose.prod.yml : mêmes images, mêmes volumes, même
+# amorçage de config. La prod n'ajoute que la publication sur le tailnet.
+#
+# Pas de network_mode: host — les conteneurs vivent sur un bridge Docker, donc
+# le :8080 du backend est interne et n'entre pas en conflit avec ce qui tourne
+# déjà sur l'hôte. Incus, lui, est SUR l'hôte : on l'atteint via
+# host.docker.internal, mappé sur la gateway du réseau Docker.
+#
+# Usage : docker compose -f docker-compose.dev.yml up -d
 
 services:
+  # Amorçage de config/plati.yaml — ne fait rien si le fichier existe déjà.
+  # Les secrets restent vides : c'est l'assistant /setup qui les pose.
+  config-init:
+    image: golang:1.23
+    container_name: plati-config-init
+    working_dir: /workspace/backend
+    command: go run ./cmd/plati-config -config /workspace/config/plati.yaml
+    volumes:
+      - ./backend:/workspace/backend        # source
+      - ./config:/workspace/config          # cible du fichier généré
+      - go-pkg:/go/pkg                      # module/build cache
+    env_file:
+      - .env.plati                          # PLATI_* — lues par le générateur
+    environment:
+      CGO_ENABLED: "0"
+    restart: "no"
+
   backend:
     image: golang:1.23
+    container_name: plati-backend
     working_dir: /workspace/backend
     command: go run ./cmd/plati-server -config /workspace/config/plati.yaml
     volumes:
       - ./backend:/workspace/backend        # source
       - ./config:/workspace/config          # plati.yaml + templates + certs
+      - plati-data:/workspace/data          # SQLite (db + -wal + -shm)
       - go-pkg:/go/pkg                      # module/build cache
-    network_mode: host
+    # Incus tourne sur l'hôte : host-gateway pointe sur l'adresse de l'hôte vue
+    # depuis le réseau Docker. Même valeur en dev et en prod, donc même config.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Publié sur la boucle locale uniquement : confort de debug et scripts de
+    # test. Le frontend, lui, passe par le réseau Docker.
+    ports:
+      - "127.0.0.1:8090:8080"
     environment:
-      CGO_ENABLED: "1"
+      CGO_ENABLED: "1"                      # requis par mattn/go-sqlite3
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   frontend:
     image: node:22-alpine
+    container_name: plati-frontend
     working_dir: /workspace/frontend
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5300"
     volumes:
       - ./frontend:/workspace/frontend      # source
       - frontend-nm:/workspace/frontend/node_modules  # isolated node_modules
-    network_mode: host
+    ports:
+      - "127.0.0.1:5300:5300"
     environment:
-      BACKEND_HOST: localhost
+      BACKEND_HOST: backend                 # résolu par le DNS Docker
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
   go-pkg:
   frontend-nm:
+  plati-data:

@@ -1,0 +1,171 @@
+# Compose de déploiement — backend Go + frontend SvelteKit (sources bind-montées,
+# comme docker-compose.dev.yml) publiés sur le tailnet en HTTPS.
+#
+#   Tailnet ──► conteneur « tailscale »  (hostname ${TS_HOSTNAME})
+#               tailscaled --tun=userspace-networking + Serve 80/443
+#                 │  netstack ne route l'entrant QUE vers 127.0.0.1
+#                 │
+#                 ├─ « frontend »  Vite  0.0.0.0:${APP_PORT}   ┐ network_mode:
+#                 └─ « backend »   Go    127.0.0.1:8080        ┘ service:tailscale
+#                                          │
+#                                          ▼ 172.31.240.1:8443
+#                                    Incus, sur l'HÔTE
+#
+# Contrairement à la recette de tailscale-dev.md, l'application n'est PAS sur
+# l'hôte : les trois conteneurs partagent le namespace réseau de tailscaled, donc
+# le 127.0.0.1 que vise netstack est déjà celui du frontend. Le sidecar socat de
+# la recette n'a plus de raison d'être et a été supprimé.
+#
+# Conséquences voulues :
+#   - aucun port applicatif n'est ouvert sur 0.0.0.0 de l'hôte (le :8080 de la
+#     machine est déjà pris par ClearML — le network_mode: host du compose dev
+#     ne peut pas fonctionner ici) ;
+#   - le backend écoute sur 127.0.0.1 dans le netns : joignable par le proxy Vite,
+#     pas depuis le tailnet ;
+#   - seul ${APP_PORT} est atteignable directement par le tailnet, en plus des
+#     80/443 servis par Serve.
+#
+# Accès :
+#   https://${TS_HOSTNAME}.<tailnet>.ts.net      depuis le tailnet (cert Tailscale)
+#   http://127.0.0.1:5300                        depuis l'hôte uniquement (debug)
+#
+# config/plati.yaml est généré au lancement par le service « config-init », et
+# UNIQUEMENT s'il est absent : il pose les valeurs d'infrastructure lues dans
+# .env.plati et laisse les secrets vides. Le backend démarre alors, redirige vers
+# /setup, et c'est l'assistant existant qui hache le mot de passe admin et tire
+# jwt_secret + secret_encryption_key. Un fichier déjà présent n'est jamais
+# réécrit — c'est ce qui protège la clé de chiffrement des secrets utilisateurs.
+#
+# Prérequis :
+#   - .env.tailscale (TS_AUTHKEY, TS_HOSTNAME, APP_PORT) et .env.plati (PLATI_*)
+#   - frontend/vite.config.ts → server.allowedHosts doit contenir
+#     ${TS_HOSTNAME}.<tailnet>.ts.net, sinon Vite répond « Blocked request »
+#   - tailnet : MagicDNS + HTTPS Certificates activés
+#
+# Usage :
+#   docker compose --env-file .env.tailscale -f docker-compose.prod.yml up -d
+#   docker compose --env-file .env.tailscale -f docker-compose.prod.yml logs -f
+#
+# Au tout premier démarrage, ouvrir https://${TS_HOSTNAME}.<tailnet>.ts.net et
+# terminer l'assistant, puis REDÉMARRER la pile :
+#
+#   docker compose --env-file .env.tailscale -f docker-compose.prod.yml restart
+#
+# L'assistant écrit jwt_secret et secret_encryption_key sur le disque mais ne les
+# recharge pas dans le processus en cours (seul admin_password_hash est mis à
+# jour en mémoire) : sans redémarrage, le backend continue de tourner avec une
+# clé de chiffrement NULLE, et tout secret utilisateur enregistré entre-temps
+# serait chiffré avec cette clé-là.
+#
+# ATTENTION aussi : l'étape « serveur Incus » de l'assistant ÉCRASE la liste
+# servers[] du fichier généré — la renseigner, sinon elle est vidée.
+#
+# ATTENTION au port : ${APP_PORT} est répercuté à DEUX endroits — la commande
+# Vite ci-dessous et EN DUR dans deploy/tailscale/serve.json (Tailscale Serve
+# n'interpole pas les variables d'environnement).
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: plati-tailscale
+    # Nom du nœud tel qu'il apparaît dans le tailnet / MagicDNS.
+    hostname: ${TS_HOSTNAME:-plati}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?TS_AUTHKEY manquant — voir .env.tailscale.example}
+      TS_STATE_DIR: /var/lib/tailscale
+      # userspace-networking : pas besoin de /dev/net/tun ni de NET_ADMIN.
+      TS_USERSPACE: "true"
+      # Ex. tags ACL : TS_EXTRA_ARGS=--advertise-tags=tag:plati
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      # Publie le frontend sur les ports 80/443 DU NŒUD (netstack), cert Tailscale.
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      # Porte l'identité du nœud : ne pas supprimer (pas de `down -v`), sinon une
+      # nouvelle clé d'auth est redemandée au redémarrage.
+      - tailscale-state:/var/lib/tailscale
+      - ./deploy/tailscale/serve.json:/config/serve.json:ro
+    # Ce conteneur détient le netns partagé : c'est donc ICI que se déclarent les
+    # ports publiés et le réseau, pas sur backend/frontend.
+    # Bind sur 127.0.0.1 : accès local de debug, rien d'ouvert sur le LAN.
+    ports:
+      - "127.0.0.1:5300:${APP_PORT:-17231}"
+    networks:
+      - plati
+    restart: unless-stopped
+
+  # Amorçage de config/plati.yaml — ne fait rien si le fichier existe déjà.
+  # Réseau « plati » ordinaire (et non le netns de tailscale) : il lui faut juste
+  # de quoi télécharger les modules Go, pas d'exposition.
+  config-init:
+    image: golang:1.23
+    container_name: plati-config-init
+    working_dir: /workspace/backend
+    command: go run ./cmd/plati-config -config /workspace/config/plati.yaml
+    volumes:
+      - ./backend:/workspace/backend        # source
+      - ./config:/workspace/config          # cible du fichier généré
+      - go-pkg:/go/pkg                      # module/build cache
+    env_file:
+      - .env.plati                          # PLATI_* — lues par le générateur
+    environment:
+      CGO_ENABLED: "0"                      # pas de SQLite ici
+    networks:
+      - plati
+    restart: "no"
+
+  backend:
+    image: golang:1.23
+    container_name: plati-backend
+    working_dir: /workspace/backend
+    command: go run ./cmd/plati-server -config /workspace/config/plati.yaml
+    volumes:
+      - ./backend:/workspace/backend        # source
+      - ./config:/workspace/config          # plati.yaml + templates + certs
+      - plati-data:/workspace/data          # SQLite (db + -wal + -shm)
+      - go-pkg:/go/pkg                      # module/build cache
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_started
+      config-init:
+        condition: service_completed_successfully
+    environment:
+      CGO_ENABLED: "1"                      # requis par mattn/go-sqlite3
+    restart: unless-stopped
+
+  frontend:
+    image: node:22-alpine
+    container_name: plati-frontend
+    working_dir: /workspace/frontend
+    # --host 0.0.0.0 : nécessaire pour que le port publié par le conteneur
+    # tailscale (docker-proxy) atteigne Vite ; 127.0.0.1 suffirait pour Serve.
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port ${APP_PORT:-17231}"
+    volumes:
+      - ./frontend:/workspace/frontend      # source
+      - frontend-nm:/workspace/frontend/node_modules  # isolated node_modules
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_started
+      backend:
+        condition: service_started
+    environment:
+      # Même netns que le backend → le proxy Vite passe par la boucle locale.
+      BACKEND_HOST: 127.0.0.1
+    restart: unless-stopped
+
+networks:
+  # Sous-réseau fixé pour que l'adresse de la gateway (= l'hôte, donc Incus) soit
+  # déterministe et puisse être écrite dans config/plati.yaml.
+  plati:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+          gateway: 172.31.240.1
+
+volumes:
+  go-pkg:
+  frontend-nm:
+  plati-data:
+  tailscale-state:

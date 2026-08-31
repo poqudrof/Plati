@@ -7,18 +7,72 @@ Plati — internal platform to manage Incus-based dev environments. Go backend +
 ## Dev Setup
 
 ```bash
-./scripts/setup-dev.sh    # First time: copies config, generates JWT secret + AES key
-make migrate              # Apply DB migrations
-make dev                  # or: mprocs
+cp .env.plati.example .env.plati                 # First time: infra values for config bootstrap
+docker compose -f docker-compose.dev.yml up -d   # config-init → backend → frontend
 ```
 
-Backend runs on `:8080`, frontend dev server on `:5173` (proxies `/api`, `/auth`, `/health` to backend).
+Open `http://127.0.0.1:5300` and complete the `/setup` wizard, then **restart the stack**
+(see "Config Bootstrap" below for why).
 
-After Go changes, restart the backend via Docker to apply them:
+Ports: frontend `127.0.0.1:5300`, backend `127.0.0.1:8090` (published for debug and test
+scripts; the frontend reaches it over the Docker network as `backend:8080`). Both are bound
+to the loopback — nothing is exposed on the LAN.
+
+Containers run on a Docker bridge, **not** `network_mode: host`: the backend's `:8080` stays
+internal, so it does not collide with whatever already listens on the host. Incus runs on the
+host and is reached via `host.docker.internal:8443`, mapped to the Docker gateway by
+`extra_hosts`.
+
+`./scripts/setup-dev.sh` + `make dev` / `mprocs` remain the host-native path (Go and Node
+installed locally, frontend on `:5173`). The Docker stack above is self-contained.
+
+After Go changes, restart the backend to apply them:
 
 ```bash
 docker compose -f docker-compose.dev.yml restart backend
 ```
+
+## Dev vs Prod
+
+`docker-compose.dev.yml` and `docker-compose.prod.yml` share the same base: same images, same
+bind-mounted sources, same volumes, same `config-init` bootstrap, same Incus access through
+`host.docker.internal`. **They use the same `config/plati.yaml` and the same `.env.plati`** —
+only `PLATI_FRONTEND_URL` differs in practice.
+
+Prod adds, and is otherwise identical:
+
+| | Dev | Prod |
+|---|---|---|
+| Frontend | `vite dev`, HMR | build ahead of time, served as static assets |
+| Exposure | `127.0.0.1:5300` only | Tailscale node, HTTPS on the tailnet |
+| Backend port | published on `127.0.0.1:8090` | not published |
+| Networking | Docker bridge | containers share tailscaled's netns |
+
+The prod stack publishes the frontend on the tailnet via a `tailscale` container running
+`tailscaled` in userspace mode with Tailscale Serve (80/443). Because netstack only routes
+inbound traffic to `127.0.0.1`, `backend` and `frontend` join that container's network
+namespace with `network_mode: "service:tailscale"` — which is why no socat sidecar is needed
+(unlike the host-app recipe in `tailscale-dev.md`). See the header of
+`docker-compose.prod.yml`.
+
+## Config Bootstrap
+
+`config/plati.yaml` is gitignored and generated at launch by the `config-init` service
+(`backend/cmd/plati-config`), **only if absent**. It writes infrastructure values read from
+`.env.plati` and leaves `admin_password_hash`, `jwt_secret` and `secret_encryption_key`
+**empty** — the existing `/setup` wizard fills those in on first visit.
+
+An existing file is never rewritten. That is what protects `secret_encryption_key`: losing it
+makes every stored user secret undecryptable.
+
+Two gotchas in `handlers/setup.go`:
+
+- **Restart the stack after completing the wizard.** `Complete()` writes `jwt_secret` and
+  `secret_encryption_key` to disk but only refreshes `AdminPasswordHash` in memory. Until a
+  restart, `NewUserService` is still running with a **zero encryption key** (its fallback when
+  the configured key is empty), so any secret saved in between is encrypted with that key.
+- **The wizard's Incus step overwrites `servers[]`.** If left blank, the `else` branch replaces
+  the list with `[]config.IncusServer{}` and the generated endpoint is lost.
 
 ## Architecture
 
@@ -229,7 +283,9 @@ make clean          # remove artifacts
 ./tests.sh --image        # image e2e tests (requires Incus + internet)
 ```
 
-Docker dev stack runs frontend on `:5300`, backend on `:8080`. `tests.sh` defaults match these ports.
+Docker dev stack runs frontend on `:5300`, backend on `:8090`. `tests.sh` still defaults to
+`http://localhost:8080` for the backend, so pass `--url http://localhost:8090` (its
+`FRONTEND_URL` default of `:5300` is still correct).
 
 See `testing.md` for the full suite reference.
 
