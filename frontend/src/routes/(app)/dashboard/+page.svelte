@@ -87,7 +87,9 @@
             {#each allInstances as inst (inst.id)}
               <tr class="border-b last:border-0">
                 <td class="px-4 py-3">
-                  <p class="font-medium text-gray-900">{inst.name}</p>
+                  <a href="/instances/{inst.id}" class="font-medium text-primary-dark hover:underline">
+                    {inst.name}
+                  </a>
                   <p class="text-xs text-gray-400 font-mono">{inst.incus_name}</p>
                 </td>
                 <td class="px-4 py-3">

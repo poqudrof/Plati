@@ -187,6 +187,37 @@ export interface Instance {
   /** Auto-stop policy. 0 minutes means "follow the platform default". */
   sleep_disabled: boolean;
   sleep_timeout_minutes: number;
+  /** Admin-set resource overrides. Empty means "inherit the template's value". */
+  limits_cpu: string;
+  limits_memory: string;
+}
+
+/**
+ * An instance's resource limits and where each one comes from, so the UI can say
+ * "from the template" or "set by an administrator" rather than showing a bare number.
+ */
+export interface InstanceResources {
+  template_cpu: string;
+  template_memory: string;
+  /** Per-instance overrides; empty when the template's value is inherited. */
+  override_cpu: string;
+  override_memory: string;
+  /** What Plati hands Incus. */
+  effective_cpu: string;
+  effective_memory: string;
+  /** Read-only: Plati has no volume resize path, and the root fs is not size-limited. */
+  template_disk: string;
+  /** Whether the caller may change these — admins only. */
+  editable: boolean;
+  /** False when the value is stored but Incus has not taken it yet. */
+  applied: boolean;
+  warning?: string;
+}
+
+/** Limits to set on one instance. An empty field clears the override. */
+export interface ResourceUpdate {
+  limits_cpu: string;
+  limits_memory: string;
 }
 
 /** Auto-stop (sleep) policy of one instance, resolved against the platform default. */

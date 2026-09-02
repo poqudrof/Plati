@@ -8,6 +8,8 @@
   import Terminal from '$lib/components/Terminal.svelte';
   import StorageTab from '$lib/components/StorageTab.svelte';
   import StatusTab from '$lib/components/StatusTab.svelte';
+  import ResourcesTab from '$lib/components/ResourcesTab.svelte';
+  import DangerZone from '$lib/components/DangerZone.svelte';
   import { currentUser } from '$lib/stores/auth';
 
   let instance: Instance | null = $state(null);
@@ -70,7 +72,7 @@
   let installingKeyId = $state(0);
 
   // Tabs below the main card
-  let detailTab: 'status' | 'storage' | 'incus' | 'secrets' | 'ssh-keys' | 'sshx' | 'tailscale' | 'openvscode' = $state('status');
+  let detailTab: 'status' | 'storage' | 'resources' | 'incus' | 'secrets' | 'ssh-keys' | 'sshx' | 'tailscale' | 'openvscode' = $state('status');
 
   // Creation log stream (while status === 'creating')
   type LogStep = { kind: 'step'; n: number; total: number; label: string; outputs: string[]; warning: string; expanded: boolean };
@@ -82,6 +84,14 @@
 
   let id = $derived(Number($page.params.id));
   let isAdmin = $derived($currentUser?.role === 'admin');
+
+  // An admin can open anyone's workspace, so the page must say whose it is before they
+  // start or rebuild it. The owner's email comes from the admin listing, which already
+  // resolves it — no extra endpoint needed.
+  // Set in load(), where the instance is already resolved: a $derived guarded on
+  // `instance != null` trips this file's existing narrowing problem with $state(null).
+  let ownerEmail = $state('');
+  let isForeign = $state(false);
   let incusUIUrl = $derived(server ? `${server.endpoint}/ui` : null);
   let includes = $derived((() => { try { return JSON.parse(template?.includes ?? '[]') as string[]; } catch { return [] as string[]; } })());
   let hasSshx = $derived(includes.includes('sshx'));
@@ -101,6 +111,11 @@
         instances.volumes(id).catch(() => null)
       ]);
       if ($currentUser?.role === 'admin' && instance) {
+        isForeign = instance.user_id !== $currentUser.id;
+        if (isForeign) {
+          const all = await admin.instances.list().catch(() => []);
+          ownerEmail = all.find(i => i.id === id)?.user_email ?? '';
+        }
         const servers = await admin.servers.list();
         server = servers.find(s => s.id === instance!.server_id) ?? null;
         incusDetail = await admin.instances.incusInfo(id).catch(() => null);
@@ -564,6 +579,16 @@
       </div>
     {/if}
 
+    {#if isForeign}
+      <div class="mb-4 p-4 rounded-md bg-amber-50 border border-amber-200">
+        <p class="text-sm text-amber-900">
+          <span class="font-semibold">Administrator view.</span>
+          This workspace belongs to {ownerEmail || 'another user'}. Start, stop, rebuild and
+          delete act on their machine, and a rebuild reinstalls their keys and secrets — not yours.
+        </p>
+      </div>
+    {/if}
+
     <!-- Main card: info + terminal + actions — always on top -->
     <div class="bg-white rounded-lg border p-6 space-y-6" class:opacity-50={instance.status === 'creating'}>
       <div class="grid grid-cols-2 gap-4">
@@ -631,9 +656,9 @@
           <button onclick={() => action(() => instances.stop(id), 'Stopped')} disabled={actionLoading}
             class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50">Stop</button>
         {/if}
-        <!-- Rebuild and Delete deliberately live elsewhere: user instances are long-lived,
-             and both actions are destructive enough not to sit next to Start/Stop.
-             Deleting is done from Settings → Delete an instance. -->
+        <!-- Rebuild and Delete deliberately do not sit next to Start/Stop: user instances
+             are long-lived and both actions are destructive. They live in the Danger zone
+             at the bottom of the Status tab, behind a typed-name confirmation. -->
       </div>
     </div>
 
@@ -652,6 +677,11 @@
           class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
             {detailTab === 'storage' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Storage</button>
+        <button
+          onclick={() => detailTab = 'resources'}
+          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            {detailTab === 'resources' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+        >Resources</button>
         {#if isAdmin}
           <button
             onclick={() => detailTab = 'incus'}
@@ -699,6 +729,18 @@
           instanceStatus={instance?.status ?? 'stopped'}
           createdAt={instance.created_at}
         />
+        <!-- Rebuild and Delete live here rather than beside Start/Stop: both are
+             destructive, and an instance is long-lived. Delete is also reachable from
+             Settings, but only for your own — an admin needs it here. -->
+        <div class="px-6 pb-6">
+          <DangerZone
+            instanceId={id}
+            instanceName={instance.name}
+            {isForeign}
+            {ownerEmail}
+            onDone={load}
+          />
+        </div>
       {/if}
 
       <!-- ── Storage tab ── -->
@@ -716,6 +758,16 @@
             <p class="text-sm text-gray-500">Storage information not available.</p>
           </div>
         {/if}
+      {/if}
+
+      <!-- ── Resources tab ── -->
+      {#if detailTab === 'resources'}
+        <ResourcesTab
+          instanceId={id}
+          instanceStatus={instance?.status ?? 'stopped'}
+          canEdit={isAdmin}
+          onSaved={load}
+        />
       {/if}
 
       <!-- ── Incus Detail tab ── -->
@@ -803,6 +855,11 @@
 
             <div class="border-t pt-4">
               <h4 class="text-sm font-semibold text-gray-700 mb-3">Edit Config</h4>
+              <p class="text-xs text-gray-500 mb-3">
+                CPU and memory are also on the Resources tab, with the template's values for
+                comparison; edits here are equivalent and equally persistent. The other keys
+                below live only in Incus and are reverted by a rebuild.
+              </p>
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label for="cfg-limits-cpu" class="block text-xs text-gray-500 mb-1">limits.cpu</label>

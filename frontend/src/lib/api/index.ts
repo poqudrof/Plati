@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
 
 // Setup
 export const setup = {
@@ -64,6 +64,8 @@ export const instances = {
   delete: (id: number) => api.del(`/api/v1/instances/${id}`),
   stats: (id: number) => api.get<InstanceStats>(`/api/v1/instances/${id}/stats`),
   volumes: (id: number) => api.get<InstanceStorageInfo>(`/api/v1/instances/${id}/volumes`),
+  // Resource limits: readable by the owner, writable only via admin.instances.
+  resources: (id: number) => api.get<InstanceResources>(`/api/v1/instances/${id}/resources`),
   // Auto-stop policy (Status tab)
   sleepSettings: (id: number) => api.get<SleepSettings>(`/api/v1/instances/${id}/sleep`),
   updateSleepSettings: (id: number, patch: { disabled?: boolean; timeout_minutes?: number }) =>
@@ -174,6 +176,8 @@ export const admin = {
     duplicate: (id: number, user_id: number) =>
       api.post<Instance>(`/api/v1/admin/instances/${id}/duplicate`, { user_id }),
     incusInfo: (id: number) => api.get<IncusDetail>(`/api/v1/admin/instances/${id}/incus-info`),
+    updateResources: (id: number, res: ResourceUpdate) =>
+      api.put<InstanceResources>(`/api/v1/admin/instances/${id}/resources`, res),
     updateIncusConfig: (id: number, config: IncusConfigUpdate) =>
       api.put(`/api/v1/admin/instances/${id}/incus-config`, config),
     exec: (id: number, command: string) =>
