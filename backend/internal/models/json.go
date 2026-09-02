@@ -19,6 +19,10 @@ type InstanceJSON struct {
 
 	SleepDisabled       bool `json:"sleep_disabled"`
 	SleepTimeoutMinutes int  `json:"sleep_timeout_minutes"`
+
+	// Empty means "inherit the template's value".
+	LimitsCPU    string `json:"limits_cpu"`
+	LimitsMemory string `json:"limits_memory"`
 }
 
 func (inst Instance) MarshalJSON() ([]byte, error) {
@@ -35,6 +39,9 @@ func (inst Instance) MarshalJSON() ([]byte, error) {
 
 		SleepDisabled:       inst.SleepDisabled,
 		SleepTimeoutMinutes: inst.SleepTimeoutMinutes,
+
+		LimitsCPU:    inst.LimitsCPU,
+		LimitsMemory: inst.LimitsMemory,
 	}
 	if inst.VolumeID.Valid {
 		j.VolumeID = &inst.VolumeID.Int64

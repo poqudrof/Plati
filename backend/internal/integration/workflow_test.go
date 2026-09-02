@@ -3360,3 +3360,195 @@ func TestRebuildByAdminUsesOwnersSecrets(t *testing.T) {
 		t.Errorf("environment.WHOSE = %q, want bobs-value", got)
 	}
 }
+
+// --- Per-instance resource limits -----------------------------------------------
+
+type resourcesJSON struct {
+	TemplateCPU     string `json:"template_cpu"`
+	TemplateMemory  string `json:"template_memory"`
+	OverrideCPU     string `json:"override_cpu"`
+	OverrideMemory  string `json:"override_memory"`
+	EffectiveCPU    string `json:"effective_cpu"`
+	EffectiveMemory string `json:"effective_memory"`
+	Editable        bool   `json:"editable"`
+	Applied         bool   `json:"applied"`
+}
+
+func TestResourceOverrideSurvivesRebuild(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	resp := h.do("POST", "/api/v1/instances", map[string]any{"name": "res-ws", "template_id": templateID})
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	resp = h.do("PUT", fmt.Sprintf("/api/v1/admin/instances/%d/resources", inst.ID),
+		map[string]any{"limits_cpu": "4", "limits_memory": "8GB"})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("set resources: %d — %s", resp.StatusCode, b)
+	}
+	var res resourcesJSON
+	mustJSON(t, resp, &res)
+	if res.EffectiveCPU != "4" || res.EffectiveMemory != "8GB" {
+		t.Errorf("effective = %s/%s, want 4/8GB", res.EffectiveCPU, res.EffectiveMemory)
+	}
+	if !res.Applied {
+		t.Errorf("applied = false, want the live push to have succeeded against the mock")
+	}
+	if cfg := h.mock.instances[inst.IncusName].Config; cfg["limits.cpu"] != "4" {
+		t.Errorf("live limits.cpu = %q, want 4", cfg["limits.cpu"])
+	}
+
+	// The whole point: UpdateIncusConfig used to write only to Incus, so a rebuild —
+	// which destroys the container and recreates it from the template — silently
+	// reverted every limit an admin had set.
+	resp = h.do("POST", fmt.Sprintf("/api/v1/instances/%d/rebuild", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("rebuild: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+
+	cfg := h.mock.instances[inst.IncusName].Config
+	if cfg["limits.cpu"] != "4" {
+		t.Errorf("limits.cpu after rebuild = %q, want 4 — the override did not survive", cfg["limits.cpu"])
+	}
+	if cfg["limits.memory"] != "8GB" {
+		t.Errorf("limits.memory after rebuild = %q, want 8GB", cfg["limits.memory"])
+	}
+}
+
+// Without an override the template's own limits must reach Incus. They did not: the
+// template stores cpu as a JSON number, which broke the decode and took memory with it.
+func TestTemplateLimitsReachIncus(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+
+	// Reproduce what the YAML importer and the template editor actually store: cpu as a
+	// JSON *number*. TemplateYAML.Resources is map[string]any and every template on disk
+	// writes `cpu: 2` unquoted, so this — not the quoted form the JSON import helper
+	// produces — is the shape production holds.
+	if _, err := h.db.Exec(
+		`UPDATE templates SET resources = ? WHERE id = ?`,
+		`{"cpu":2,"disk":"20GB","memory":"4GB"}`, templateID); err != nil {
+		t.Fatalf("store numeric resources: %v", err)
+	}
+
+	resp := h.do("POST", "/api/v1/instances", map[string]any{"name": "tmpl-limits", "template_id": templateID})
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	cfg := h.mock.instances[inst.IncusName].Config
+	if cfg["limits.cpu"] != "2" {
+		t.Errorf("limits.cpu = %q, want 2 — the template's numeric cpu was dropped", cfg["limits.cpu"])
+	}
+	if cfg["limits.memory"] != "4GB" {
+		t.Errorf("limits.memory = %q, want 4GB — the type error took memory down with cpu", cfg["limits.memory"])
+	}
+	t.Logf("created with limits.cpu=%q limits.memory=%q", cfg["limits.cpu"], cfg["limits.memory"])
+}
+
+func TestResourceEditIsAdminOnly(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	bobID := seedBob(t, h, "userpass123")
+
+	resp := h.do("POST", "/api/v1/admin/instances", map[string]any{
+		"name": "bob-res", "template_id": templateID, "user_id": bobID,
+	})
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	loginAs(t, h, map[string]string{"email": "bob@test.com", "password": "userpass123"})
+
+	// Bob reads his own limits, read-only.
+	resp = h.do("GET", fmt.Sprintf("/api/v1/instances/%d/resources", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bob GET own resources: %d — %s", resp.StatusCode, b)
+	}
+	var res resourcesJSON
+	mustJSON(t, resp, &res)
+	if res.Editable {
+		t.Errorf("editable = true for a regular user, want false")
+	}
+
+	// And cannot write them.
+	resp = h.do("PUT", fmt.Sprintf("/api/v1/admin/instances/%d/resources", inst.ID),
+		map[string]any{"limits_cpu": "64"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("bob PUT resources: got %d, want 403", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	var cpu string
+	h.db.Get(&cpu, "SELECT limits_cpu FROM instances WHERE id = ?", inst.ID)
+	if cpu != "" {
+		t.Errorf("limits_cpu = %q after bob's attempt, want empty", cpu)
+	}
+}
+
+func TestResourceValidationRejectsGarbage(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	resp := h.do("POST", "/api/v1/instances", map[string]any{"name": "res-valid", "template_id": templateID})
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	path := fmt.Sprintf("/api/v1/admin/instances/%d/resources", inst.ID)
+	// Incus accepts these at update time and only fails at the next container start,
+	// long after the admin has navigated away — so Plati rejects them up front.
+	for _, bad := range []map[string]any{
+		{"limits_cpu": "lots"},
+		{"limits_cpu": "-1"},
+		{"limits_memory": "4 gigabytes"},
+		{"limits_memory": "8"},
+	} {
+		resp := h.do("PUT", path, bad)
+		got := resp.StatusCode
+		resp.Body.Close()
+		if got != http.StatusBadRequest {
+			t.Errorf("PUT %v: got %d, want 400", bad, got)
+		}
+	}
+
+	// The valid forms are all accepted.
+	for _, ok := range []map[string]any{
+		{"limits_cpu": "2"},
+		{"limits_cpu": "0-3"},
+		{"limits_cpu": "50%"},
+		{"limits_memory": "4GB"},
+		{"limits_memory": "512MiB"},
+		{"limits_cpu": "", "limits_memory": ""},
+	} {
+		resp := h.do("PUT", path, ok)
+		got := resp.StatusCode
+		resp.Body.Close()
+		if got != http.StatusOK {
+			t.Errorf("PUT %v: got %d, want 200", ok, got)
+		}
+	}
+
+	// Clearing an override must fall back to the template's value, not to "no limit":
+	// UpdateInstanceConfig treats an empty value as "delete this key".
+	cfg := h.mock.instances[inst.IncusName].Config
+	if cfg["limits.cpu"] == "" {
+		t.Errorf("limits.cpu was deleted when the override was cleared; want the template's value")
+	}
+}

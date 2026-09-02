@@ -215,6 +215,53 @@ func (h *InstanceHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// Resources reports an instance's CPU, memory and disk limits, and where each comes
+// from. Mounted on the user route: an owner sees theirs read-only (editable=false),
+// an admin sees any instance's.
+func (h *InstanceHandler) Resources(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	res, err := h.svc.GetResources(id, actor)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// UpdateResources sets an instance's CPU and memory limits. Mounted under /admin, so
+// AdminMiddleware supplies the 403 — there is deliberately no role check here, since a
+// handler that forgets one is exactly how such checks get lost.
+func (h *InstanceHandler) UpdateResources(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req services.ResourceUpdate
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	res, err := h.svc.UpdateResources(id, actor, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (h *InstanceHandler) SshxURL(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
 	if !ok {

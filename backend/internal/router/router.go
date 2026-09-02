@@ -112,6 +112,9 @@ func New(deps Deps) *chi.Mux {
 			r.Get("/instances/{id}/sleep", deps.SleepHandler.Get)
 			r.Put("/instances/{id}/sleep", deps.SleepHandler.Update)
 			r.Post("/instances/{id}/sleep/reset", deps.SleepHandler.Reset)
+			// Resource limits: readable by the owner, writable only through the admin
+			// route below.
+			r.Get("/instances/{id}/resources", deps.InstanceHandler.Resources)
 			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
 			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
 			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)
@@ -200,6 +203,7 @@ func New(deps Deps) *chi.Mux {
 				r.Post("/instances/{id}/duplicate", deps.AdminHandler.DuplicateInstance)
 				r.Get("/instances/{id}/incus-info", deps.InstanceHandler.IncusDetail)
 				r.Put("/instances/{id}/incus-config", deps.InstanceHandler.UpdateIncusConfig)
+				r.Put("/instances/{id}/resources", deps.InstanceHandler.UpdateResources)
 				r.Get("/instances/{id}/debug-logs", deps.TerminalHandler.DebugLogs)
 				r.Post("/instances/{id}/exec", deps.AdminHandler.ExecCommand)
 				r.Post("/instances/{id}/reapply-setup", deps.AdminHandler.ReapplySetup)

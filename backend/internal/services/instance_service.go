@@ -276,6 +276,62 @@ func templateIncusConfig(t *models.Template) map[string]string {
 	return cfg
 }
 
+// resourcesFromJSON decodes a template's resources column. The column holds whatever the
+// template YAML said, and every template on disk writes `cpu: 2` unquoted, so the values
+// are not uniformly strings: decoding straight into map[string]string makes the decoder
+// record an UnmarshalTypeError, drop the numeric entries, and return both a partial map
+// and a non-nil error. Callers then either discarded the whole map (Create, CreateAsync —
+// losing memory and disk along with cpu, so instances got no limits at all) or ignored the
+// error (Rebuild — losing cpu only). Decoding into any and stringifying accepts both the
+// quoted and the unquoted form, which is what the DB actually contains.
+func resourcesFromJSON(raw string) map[string]string {
+	if raw == "" || raw == "{}" {
+		return map[string]string{}
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		log.Printf("warning: invalid template resources %q: %v", raw, err)
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(decoded))
+	for k, v := range decoded {
+		switch val := v.(type) {
+		case string:
+			out[k] = val
+		case float64:
+			// Not %v: it formats large float64 in scientific notation ("1e+06"),
+			// which Incus rejects as a limits value.
+			out[k] = strconv.FormatFloat(val, 'f', -1, 64)
+		case bool:
+			out[k] = strconv.FormatBool(val)
+		case nil:
+			// An explicit null means "unset"; skip it rather than writing "<nil>".
+		default:
+			out[k] = fmt.Sprintf("%v", val)
+		}
+	}
+	return out
+}
+
+// instanceResources returns the resource map to build the Incus config from: the
+// template's resources with the instance's admin-set overrides applied on top. A nil inst
+// (creation, before the row exists) or an empty override field leaves the template value
+// untouched, so an instance nobody has edited behaves exactly as it did before overrides
+// existed.
+func instanceResources(tmpl *models.Template, inst *models.Instance) map[string]string {
+	res := resourcesFromJSON(tmpl.Resources)
+	if inst == nil {
+		return res
+	}
+	if inst.LimitsCPU != "" {
+		res["cpu"] = inst.LimitsCPU
+	}
+	if inst.LimitsMemory != "" {
+		res["memory"] = inst.LimitsMemory
+	}
+	return res
+}
+
 func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, error) {
 	// Get template
 	tmpl, err := queries.GetTemplate(s.db, req.TemplateID)
@@ -299,11 +355,8 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
-	// Parse template resources
-	var resources map[string]string
-	if err := json.Unmarshal([]byte(tmpl.Resources), &resources); err != nil {
-		resources = map[string]string{}
-	}
+	// Parse template resources. No instance row exists yet, so there is no override.
+	resources := instanceResources(tmpl, nil)
 
 	// Parse profiles
 	var profiles []string
@@ -480,10 +533,8 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
-	var resources map[string]string
-	if err := json.Unmarshal([]byte(tmpl.Resources), &resources); err != nil {
-		resources = map[string]string{}
-	}
+	// No instance row exists yet, so there is no override to apply.
+	resources := instanceResources(tmpl, nil)
 	var profiles []string
 	if err := json.Unmarshal([]byte(tmpl.Profiles), &profiles); err != nil {
 		profiles = []string{"default"}
@@ -745,9 +796,9 @@ func (s *InstanceService) Rebuild(id int64, actor auth.Actor) error {
 		return fmt.Errorf("delete for rebuild: %w", err)
 	}
 
-	// Parse template data
-	var resources map[string]string
-	json.Unmarshal([]byte(tmpl.Resources), &resources)
+	// Parse template data. inst carries the admin's overrides, which is what makes a
+	// resource change survive the destroy-and-recreate below.
+	resources := instanceResources(tmpl, inst)
 	var profiles []string
 	if err := json.Unmarshal([]byte(tmpl.Profiles), &profiles); err != nil {
 		profiles = []string{"default"}
@@ -1720,7 +1771,13 @@ func (s *InstanceService) UpdateIncusConfig(instanceID int64, req IncusConfigUpd
 		"security.nesting":     req.SecurityNesting,
 		"security.privileged":  req.SecurityPrivileged,
 	}
-	return client.UpdateInstanceConfig(inst.IncusName, config)
+	if err := client.UpdateInstanceConfig(inst.IncusName, config); err != nil {
+		return err
+	}
+	// Persist the two limits that have a home in the DB, so this raw form and the
+	// Resources tab agree and neither silently loses its edit at the next rebuild.
+	// The other keys here live only in Incus and are still reverted by a rebuild.
+	return queries.UpdateInstanceResources(s.db, instanceID, req.LimitsCPU, req.LimitsMemory)
 }
 
 // GetIncusDetail returns live Incus state for an instance (admin use).

@@ -197,10 +197,16 @@ type Instance struct {
 
 	// Auto-stop policy. SleepDisabled takes the instance out of the sleep
 	// worker's sweep; SleepTimeoutMinutes of 0 means "use the platform default".
-	SleepDisabled       bool      `db:"sleep_disabled" json:"sleep_disabled"`
-	SleepTimeoutMinutes int       `db:"sleep_timeout_minutes" json:"sleep_timeout_minutes"`
-	CreatedAt           time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt           time.Time `db:"updated_at" json:"updated_at"`
+	SleepDisabled       bool `db:"sleep_disabled" json:"sleep_disabled"`
+	SleepTimeoutMinutes int  `db:"sleep_timeout_minutes" json:"sleep_timeout_minutes"`
+
+	// Per-instance resource overrides set by an administrator. The empty string means
+	// "inherit the template's value". Kept as strings because limits.cpu accepts a
+	// count, a pinned set ("0-3") or a percentage, and limits.memory carries its unit.
+	LimitsCPU    string    `db:"limits_cpu" json:"limits_cpu"`
+	LimitsMemory string    `db:"limits_memory" json:"limits_memory"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // AdminInstance is an Instance enriched with the owner and template names.

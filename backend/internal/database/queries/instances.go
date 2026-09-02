@@ -176,3 +176,18 @@ func InstanceIncusNameTaken(db *sqlx.DB, serverID, excludeID int64, incusName st
 	)
 	return n > 0, err
 }
+
+// UpdateInstanceResources stores the admin-set CPU and memory limits of an instance. The
+// empty string clears an override, reverting that limit to the template's value.
+//
+// Unlike UpdateInstanceName and UpdateInstanceSleep this does not filter on user_id:
+// resource limits are an administrative setting, and the route that reaches it is
+// admin-gated. Scoping it by the caller would only ever match zero rows.
+func UpdateInstanceResources(db *sqlx.DB, id int64, cpu, memory string) error {
+	_, err := db.Exec(
+		`UPDATE instances SET limits_cpu = ?, limits_memory = ?,
+		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		cpu, memory, id,
+	)
+	return err
+}
