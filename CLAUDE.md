@@ -355,6 +355,8 @@ Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (
 | `GET` | `/api/v1/admin/settings/tailscale-key` | Check if platform key configured (`{"configured": bool}`) |
 | `PUT` | `/api/v1/admin/settings/tailscale-key` | Set platform Tailscale auth key |
 | `DELETE` | `/api/v1/admin/settings/tailscale-key` | Remove platform Tailscale auth key |
+| `GET` | `/api/v1/instances/{id}/resources` | Template / override / effective CPU and memory, plus `editable` |
+| `PUT` | `/api/v1/admin/instances/{id}/resources` | Set `{"limits_cpu","limits_memory"}`; empty clears the override |
 | `GET` | `/api/v1/admin/instances` | Every user's instances, with `user_email` / `user_name` / `template_name` resolved |
 | `POST` | `/api/v1/admin/instances/{id}/duplicate` | Copy any instance and assign it to `{"user_id": N}` (omitted = source's owner) |
 
@@ -404,10 +406,9 @@ same reason `AdminInstance` does — see the note under "Admin View of All Works
 ## Admin View of All Workspaces
 
 The dashboard shows a **Mine / All users** tab bar to admins. "All users" is a table
-(`GET /api/v1/admin/instances`) rather than the usual `InstanceCard` grid, because every
-`/api/v1/instances/{id}/…` route is scoped to the caller via `GetInstanceByUser` — an admin
-cannot start, stop, or open someone else's instance through them. Duplicate is the exception:
-it has an admin route of its own.
+(`GET /api/v1/admin/instances`) rather than the usual `InstanceCard` grid. Each row's name
+links to `/instances/{id}`, which an admin can open and drive exactly like the owner — see
+"Admin Access to Any Instance" below.
 
 `DuplicateInstanceButton.svelte` carries both paths. Given a non-empty `users` prop (admins
 only) it shows an "assign to" picker and posts to the admin route; otherwise it posts to
@@ -420,6 +421,89 @@ Two things to know about the model side:
   it the owner and template columns are silently dropped from the response.
 - `incus_name` is `plati-{user_id}-{name}` and `(incus_name, server_id)` is unique, so a second
   copy into the same account would collide. `freeInstanceName` picks `…-copy`, `…-copy-2`, …
+
+## Admin Access to Any Instance
+
+Every instance-scoped route resolves through one function:
+
+```go
+queries.GetInstanceForActor(db, id, actor)   // admin → any instance; anyone else → their own
+```
+
+`auth.Actor{UserID, Admin}` comes from `auth.ActorFrom(ctx)`, and handlers get it via
+`requireActor(w, r)` (which also supplies the 401 those handlers used to lack — they
+dereferenced a possibly-nil `*ContextUser`). **`GetInstanceByUser` must not be called
+outside `queries/instances.go`**; a grep returning more than the two lines there means the
+gate has been bypassed.
+
+`Actor` is a struct rather than a sentinel user ID (`0 == admin`) deliberately: an `int64`
+actor and an `int64` userID are interchangeable at every call site, and the natural
+defensive fix for a nil user — `var uid int64; if u != nil { uid = u.ID }` — would silently
+become full admin access. `Actor`'s zero value is nobody, so a forgotten initialisation
+denies.
+
+**Reaching an instance is not the same as acting as its owner.** Anything downstream that
+needs SSH keys, secrets or preferences must read `inst.UserID`, never `actor.UserID`:
+
+- `Rebuild` recreates the container and re-injects both. With the caller's id, an admin
+  rebuilding someone's workspace would inject **their own decrypted secrets** into that
+  container and replace the owner's SSH keys with their own, locking them out.
+- `Rename` and `SleepService.UpdateSettings` write through `UpdateInstanceName` /
+  `UpdateInstanceSleep` / `UpdateInstanceIncusName`, which all filter `WHERE user_id = ?`.
+  The wrong id updates zero rows and still returns **200** — a silent no-op that only a DB
+  assertion catches, which is why the tests assert the row and not the status code.
+- `Duplicate` copies to `orig.UserID`. Identical for a non-admin; for an admin it means
+  "give this user another copy". `DuplicateForUser` is the route that targets another
+  account.
+
+`TerminalHandler.Connect` keeps a *separate* role check for which unix account you may exec
+as (`!actor.Admin && execUser != "root"`) — that is a different policy from reaching the
+instance.
+
+## Per-Instance Resource Limits
+
+CPU and memory are stored on the `instances` row (migration 019), empty meaning "inherit
+the template" the way `sleep_timeout_minutes = 0` means "platform default":
+
+| Column | Meaning |
+|---|---|
+| `limits_cpu` | `"2"`, a pinned set `"0-3"`, or a share `"50%"` |
+| `limits_memory` | `"4GB"`, `"512MiB"`, or a share |
+
+They are **strings**, not numbers: `limits.cpu` legitimately takes a range or a percentage.
+
+`instanceResources(tmpl, inst)` merges template → per-instance override, and all three
+build paths (`Create`, `CreateAsync`, `Rebuild`) go through it before
+`incus.BuildInstanceConfig`, whose `extra` (the template's `incus_config`) still wins last.
+Storing the override in the DB is the point: `UpdateIncusConfig` wrote only to Incus, so a
+rebuild — which destroys the container and recreates it from the template — silently
+reverted every limit an admin had set. `UpdateIncusConfig` now persists the two limits it
+shares with this path, so the raw Incus form and the Resources tab cannot disagree.
+
+Two traps:
+
+- **`resourcesFromJSON`, not `json.Unmarshal` into `map[string]string`.** `templates.resources`
+  holds whatever the YAML said, and every template writes `cpu: 2` unquoted, so the column
+  contains a JSON *number*. Decoding that into `map[string]string` makes the decoder record
+  an `UnmarshalTypeError` and return a partial map *and* an error — which is why instances
+  used to be created with no `limits.cpu` **and** no `limits.memory` at all. Stringify with
+  `strconv`, never `%v`: `%v` renders a large `float64` as `1e+06`, which Incus rejects.
+- **`UpdateInstanceConfig` deletes a key when given `""`.** Clearing an override must
+  therefore resolve back through `instanceResources` to the template's value, not send an
+  empty string — which would leave the container with no limit at all.
+
+Routes: `GET /api/v1/instances/{id}/resources` is a user route (owner reads theirs with
+`editable: false`, admin reads anyone's); `PUT /api/v1/admin/instances/{id}/resources` sits
+under `/admin` so `AdminMiddleware` supplies the 403 rather than an in-handler role check.
+Limits are validated up front, since Incus accepts a malformed value and only fails at the
+next container start.
+
+**Disk is read-only.** Three different things get called "disk" here: the container's root
+filesystem is never size-limited by Plati (`BuildInstanceConfig` ignores `resources["disk"]`
+and no `root` device is set); the persistent volume's size is fixed at `CreateVolume` and
+there is no resize path anywhere (`UpdateStoragePoolVolume` is only used by
+`RestoreVolumeSnapshot`); and `resources.disk` in the template merely seeds
+`defaultPersistenceDirs`. The Resources tab says so rather than implying otherwise.
 
 ## Adding a New API Endpoint
 
