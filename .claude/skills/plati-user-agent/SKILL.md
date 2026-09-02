@@ -7,7 +7,7 @@ description: Act on behalf of a Plati user — list, create, start, stop, rebuil
 
 ## What Plati is
 
-Plati is an internal platform that provisions and manages **Incus-based dev environment VMs/containers** ("instances") from reusable **templates** (base image + resources + a persistent `/workspace` volume + setup commands). Backend on `:8080`; you talk to it purely over its HTTP API — there is no shell/SSH access to the platform host itself (though you can act *inside* your own instance via its own SSH/terminal, which is separate from this API).
+Plati is an internal platform that provisions and manages **Incus-based dev environment VMs/containers** ("instances") from reusable **templates** (base image + resources + a persistent volume on the login user's home + setup commands). Backend on `:8080`; you talk to it purely over its HTTP API — there is no shell/SSH access to the platform host itself (though you can act *inside* your own instance via its own SSH/terminal, which is separate from this API).
 
 Core objects relevant to you:
 - **Instance** — your dev environment (`status`: `creating|running|stopped|error`).
@@ -55,6 +55,8 @@ All under `$PLATI_BASE_URL/api/v1/...`. JSON bodies throughout.
 | `POST` | `/instances/{id}/start` \| `/stop` \| `/rebuild` \| `/duplicate` | Lifecycle actions |
 | `GET` | `/instances/{id}/stats` | Resource usage |
 | `GET` | `/instances/{id}/volumes` | Attached volumes |
+| `GET`/`PUT` | `/instances/{id}/sleep` | Auto-stop policy: `{"disabled"?,"timeout_minutes"?}` (0 = platform default) |
+| `POST` | `/instances/{id}/sleep/reset` | Buy another full timeout before the auto-stop |
 | `GET` | `/instances/{id}/sshx-url` | Web terminal share link |
 | `GET`/`POST`/`DELETE` | `/instances/{id}/tailscale-serve` | Tailscale Serve exposure |
 | `GET` | `/instances/{id}/tailscale-status` | Tailscale status |
@@ -67,7 +69,7 @@ All under `$PLATI_BASE_URL/api/v1/...`. JSON bodies throughout.
 ### Storage (your instance's workspace)
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/instances/{id}/storage/browse?path=/workspace` | Directory listing |
+| `GET` | `/instances/{id}/storage/browse?path=/home/ubuntu` | Directory listing |
 | `GET` | `/instances/{id}/storage/download?path=...` | Download one file |
 | `GET` | `/instances/{id}/storage/download-dir?path=...` | Download a directory as `.tar` |
 | `GET`/`POST` | `/instances/{id}/storage/volumes/{vol_id}/snapshots` | List / create snapshot |

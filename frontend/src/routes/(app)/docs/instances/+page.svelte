@@ -13,12 +13,12 @@
     <h2 class="text-xl font-semibold mb-4">Lifecycle</h2>
     <div class="bg-white border rounded-lg p-4">
       <ol class="space-y-3 text-sm text-gray-600">
-        <li><b>1. Create</b> — Pick a name and a template. Plati selects a server with capacity, creates a persistent workspace volume, launches the container, and injects your SSH keys.</li>
-        <li><b>2. Running</b> — The instance is up and reachable via SSH. Your workspace is at <code class="bg-gray-100 px-1 rounded">/workspace</code>.</li>
-        <li><b>3. Stop</b> — Shuts the instance down gracefully. The workspace volume is preserved. Instances are auto-stopped after the configured inactivity timeout (default 4 hours).</li>
-        <li><b>4. Start</b> — Boots a stopped instance back up. All data in <code class="bg-gray-100 px-1 rounded">/workspace</code> is intact.</li>
-        <li><b>5. Rebuild</b> — Destroys and recreates the container from the same template, but <b>keeps the workspace volume</b>. Useful to get a fresh OS while keeping your project files.</li>
-        <li><b>6. Delete</b> — Permanently removes the instance <b>and its workspace volume</b>. This is irreversible.</li>
+        <li><b>1. Create</b> — Pick a name and a template. Plati selects a server with capacity, creates the persistent volume(s) the template declares, launches the container, and injects your SSH keys.</li>
+        <li><b>2. Running</b> — The instance is up and reachable via SSH. Your files live in your home directory (<code class="bg-gray-100 px-1 rounded">/home/ubuntu</code> on most templates), which is the persistent volume.</li>
+        <li><b>3. Stop</b> — Shuts the instance down gracefully. The persistent volume is preserved. Instances are auto-stopped after the configured inactivity timeout (default 4 hours).</li>
+        <li><b>4. Start</b> — Boots a stopped instance back up. All data on the persistent volume is intact.</li>
+        <li><b>5. Rebuild</b> — Destroys and recreates the container from the same template, but <b>keeps the persistent volume</b>. Useful to get a fresh OS while keeping your project files.</li>
+        <li><b>6. Delete</b> — Permanently removes the instance <b>and its persistent volume</b>. This is irreversible.</li>
       </ol>
     </div>
   </section>

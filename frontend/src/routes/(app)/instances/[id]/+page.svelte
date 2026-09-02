@@ -2,11 +2,12 @@
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { instances, admin, templates } from '$lib/api';
-  import type { Instance, Server, InstanceSecret, IncusDetail, IncusConfigUpdate, Template, TailscaleServeResult, TailscaleStatusResult, InstanceStorageInfo } from '$lib/api/types';
+  import type { Instance, Server, InstanceSecret, InstanceAuthorizedKey, IncusDetail, IncusConfigUpdate, Template, TailscaleServeResult, TailscaleStatusResult, InstanceStorageInfo } from '$lib/api/types';
   import { goto } from '$app/navigation';
   import { addNotification } from '$lib/stores/notifications';
   import Terminal from '$lib/components/Terminal.svelte';
   import StorageTab from '$lib/components/StorageTab.svelte';
+  import StatusTab from '$lib/components/StatusTab.svelte';
   import { currentUser } from '$lib/stores/auth';
 
   let instance: Instance | null = $state(null);
@@ -41,6 +42,19 @@
   let tsServePort = $state(8080);
   let tsServeLoading = $state(false);
 
+  // Inline rename (the name doubles as the Tailscale hostname)
+  let renaming = $state(false);
+  let renameValue = $state('');
+  let renameSaving = $state(false);
+  // Renaming the Incus container needs it stopped, so it is opt-in and off by
+  // default. Renaming inside Ubuntu costs nothing, so it is on by default.
+  let renameContainer = $state(false);
+  let renameSystemHostname = $state(true);
+  // Mirrors sanitizeName() in backend/internal/services/instance_service.go
+  let renamePreview = $derived(
+    renameValue.trim().toLowerCase().replace(/ /g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 40)
+  );
+
   // Tailscale machine status (DNS name)
   let tsStatus = $state<TailscaleStatusResult | null>(null);
 
@@ -50,8 +64,13 @@
   // Terminal user toggle (root vs unprivileged)
   let terminalUser = $state('root');
 
+  // Authorized keys (SSH access)
+  let authorizedKeys: InstanceAuthorizedKey[] = $state([]);
+  let authorizedKeysLoading = $state(false);
+  let installingKeyId = $state(0);
+
   // Tabs below the main card
-  let detailTab: 'storage' | 'incus' | 'secrets' | 'sshx' | 'tailscale' | 'openvscode' = $state('storage');
+  let detailTab: 'status' | 'storage' | 'incus' | 'secrets' | 'ssh-keys' | 'sshx' | 'tailscale' | 'openvscode' = $state('status');
 
   // Creation log stream (while status === 'creating')
   type LogStep = { kind: 'step'; n: number; total: number; label: string; outputs: string[]; warning: string; expanded: boolean };
@@ -67,6 +86,9 @@
   let includes = $derived((() => { try { return JSON.parse(template?.includes ?? '[]') as string[]; } catch { return [] as string[]; } })());
   let hasSshx = $derived(includes.includes('sshx'));
   let hasTailscale = $derived(includes.includes('tailscale'));
+  // The login user and their home, shared by the Storage, SSH and OpenVSCode tabs.
+  let termUser = $derived(template?.terminal_user || 'root');
+  let homeDir = $derived(termUser === 'root' ? '/root' : `/home/${termUser}`);
   let hasVSCode = $derived(includes.includes('openvscode-server'));
 
   async function load() {
@@ -108,6 +130,33 @@
     }
   }
 
+  async function loadAuthorizedKeys() {
+    if (!browser) return;
+    authorizedKeysLoading = true;
+    try {
+      authorizedKeys = await instances.listAuthorizedKeys(id);
+    } catch (e: any) {
+      addNotification('error', 'Failed to load public keys: ' + e.message);
+    } finally { authorizedKeysLoading = false; }
+  }
+
+  // The owner's own keys are listed first; server admins' keys are offered separately
+  // so granting an administrator access is a deliberate, clearly-labelled action.
+  let ownerKeys = $derived(authorizedKeys.filter(k => !k.is_admin));
+  let adminKeys = $derived(authorizedKeys.filter(k => k.is_admin));
+  let showAdminKeys = $state(false);
+
+  async function installAuthorizedKey(key: InstanceAuthorizedKey) {
+    installingKeyId = key.id;
+    try {
+      await instances.addAuthorizedKey(id, key.id);
+      addNotification('success', `Key "${key.name}" added to authorized_keys`);
+      await loadAuthorizedKeys();
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally { installingKeyId = 0; }
+  }
+
   async function loadSshxUrl() {
     if (!browser || !instance || instance.status !== 'running') return;
     if (sshxRefreshTimer) { clearTimeout(sshxRefreshTimer); sshxRefreshTimer = null; }
@@ -129,6 +178,91 @@
   async function loadTsStatus() {
     if (!browser || !instance || instance.status !== 'running') return;
     try { tsStatus = await instances.tailscaleStatus(id); } catch { tsStatus = null; }
+  }
+
+  function startRename() {
+    if (!instance) return;
+    renameValue = instance.name;
+    renameContainer = false;
+    renameSystemHostname = true;
+    renaming = true;
+  }
+
+  // The container name is derived from the owner and the sanitized name, exactly
+  // as the backend builds it — shown so the change is visible before saving.
+  let renameIncusPreview = $derived(
+    instance && renamePreview ? `plati-${instance.user_id}-${renamePreview}` : ''
+  );
+  let renameIncusChanges = $derived(
+    !!instance && !!renameIncusPreview && renameIncusPreview !== instance.incus_name
+  );
+
+  async function saveRename() {
+    if (!instance || !renamePreview) { renaming = false; return; }
+    if (renameValue === instance.name && !renameContainer && !renameSystemHostname) { renaming = false; return; }
+    if (renameContainer && instance.status === 'running' &&
+        !confirm('Renaming the container stops the instance and starts it again. Running processes and terminal sessions will be lost. Continue?')) {
+      return;
+    }
+    renameSaving = true;
+    try {
+      const result = await instances.rename(id, renameValue.trim(), {
+        rename_container: renameContainer,
+        rename_system_hostname: renameSystemHostname
+      });
+      instance = result;
+      renaming = false;
+      if (renameContainer && !result.container_renamed) {
+        addNotification('error', `Renamed, but the container was not: ${result.container_rename_error ?? 'unknown error'}`);
+      } else {
+        const applied = [`tailnet hostname ${renamePreview}`];
+        if (result.container_renamed) applied.push(`container ${result.incus_name}`);
+        if (result.system_hostname) applied.push(`Ubuntu hostname ${result.system_hostname}`);
+        addNotification('success',
+          `Renamed — ${applied.join(', ')}` + (result.restarted ? ' (instance restarted)' : ''));
+      }
+      // A requested Ubuntu rename that came back with nothing did not reach the
+      // instance — say so rather than letting the success message imply it did.
+      if (renameSystemHostname && !result.system_hostname) {
+        addNotification('error', 'The hostname inside Ubuntu could not be applied — the instance must be running');
+      }
+      loadTsStatus();
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally { renameSaving = false; }
+  }
+
+  // Tailscale can be unusable three ways: never installed, daemon down, or logged out
+  // (no auth key at create time). All three are fixed by re-applying the mixin.
+  let tsInstalling = $state(false);
+  let tsNeedsInstall = $derived(
+    instance?.status === 'running' && hasTailscale &&
+    (!tsStatus || !tsStatus.installed || !tsStatus.daemon_active || !tsStatus.connected)
+  );
+  let tsProblem = $derived(
+    !tsStatus || !tsStatus.installed ? 'Tailscale is not installed in this instance.'
+    : !tsStatus.daemon_active ? 'Tailscale is installed but tailscaled is not running.'
+    : 'Tailscale is installed but this machine is not logged in to the tailnet.'
+  );
+
+  async function installTailscale() {
+    tsInstalling = true;
+    try {
+      tsStatus = await instances.tailscaleInstall(id);
+      if (tsStatus.connected) {
+        addNotification('success', `Tailscale connected as ${tsStatus.dns_name}`);
+      } else if (!tsStatus.installed) {
+        addNotification('error', 'Tailscale could not be installed — see the panel for details');
+      } else if (!tsStatus.daemon_active) {
+        addNotification('error', 'tailscaled did not start — see the panel for details');
+      } else {
+        // The auth key is the usual culprit: single-use keys are spent by the
+        // first machine, so a duplicated instance cannot log in with the same one.
+        addNotification('error', 'The auth key was refused — see the panel for what Tailscale said');
+      }
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally { tsInstalling = false; }
   }
 
   async function startTsServe() {
@@ -197,12 +331,6 @@
     } finally {
       actionLoading = false;
     }
-  }
-
-  async function deleteInstance() {
-    if (!confirm('Are you sure you want to delete this instance?')) return;
-    await action(() => instances.delete(id), 'Instance deleted');
-    goto('/dashboard');
   }
 
   async function applyIncusConfig() {
@@ -303,7 +431,76 @@
 {:else if instance}
   <div>
     <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold">{instance.name}</h1>
+      {#if renaming}
+        <div class="flex items-start gap-2">
+          <div>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="text-2xl font-bold border-b-2 border-primary focus:outline-none bg-transparent"
+              bind:value={renameValue}
+              disabled={renameSaving}
+              onkeydown={(e) => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') renaming = false; }}
+              autofocus
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Tailnet hostname: <code class="bg-gray-100 px-1 rounded">{renamePreview || '—'}</code>
+            </p>
+            <label class="flex items-start gap-2 mt-2 text-xs text-gray-600">
+              <input type="checkbox" bind:checked={renameSystemHostname}
+                disabled={renameSaving || instance.status !== 'running'} class="mt-0.5" />
+              <span>
+                Rename the hostname inside Ubuntu
+                {#if instance.status !== 'running'}
+                  <span class="block text-gray-400">Needs the instance running.</span>
+                {:else}
+                  <span class="block text-gray-400">
+                    Sets <code class="bg-gray-100 px-1 rounded">/etc/hostname</code> and the
+                    <code class="bg-gray-100 px-1 rounded">/etc/hosts</code> entry, and applies it live — no reboot.
+                  </span>
+                {/if}
+              </span>
+            </label>
+            <label class="flex items-start gap-2 mt-2 text-xs text-gray-600">
+              <input type="checkbox" bind:checked={renameContainer} disabled={renameSaving} class="mt-0.5" />
+              <span>
+                Rename the Incus container too:
+                <code class="bg-gray-100 px-1 rounded">{instance.incus_name}</code>
+                {#if renameIncusChanges}→ <code class="bg-gray-100 px-1 rounded">{renameIncusPreview}</code>{/if}
+                {#if renameContainer}
+                  <span class="block text-amber-700 mt-1">
+                    {#if instance.status === 'running'}
+                      The instance is stopped and started again — running processes and terminal sessions are lost.
+                    {:else}
+                      The instance is stopped, so it renames directly.
+                    {/if}
+                    Storage volumes keep their current names.
+                  </span>
+                {/if}
+              </span>
+            </label>
+          </div>
+          <button
+            class="px-3 py-1 text-sm bg-primary text-white rounded disabled:opacity-50"
+            onclick={saveRename}
+            disabled={renameSaving || !renamePreview}
+          >{renameSaving ? 'Saving…' : 'Save'}</button>
+          <button
+            class="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+            onclick={() => renaming = false}
+            disabled={renameSaving}
+          >Cancel</button>
+        </div>
+      {:else}
+        <div class="flex items-center gap-2">
+          <h1 class="text-2xl font-bold">{instance.name}</h1>
+          <button
+            class="text-gray-400 hover:text-gray-700 text-sm"
+            onclick={startRename}
+            title="Rename (also changes the Tailscale hostname)"
+            aria-label="Rename instance"
+          >&#9998;</button>
+        </div>
+      {/if}
       <span class="px-3 py-1 rounded-full text-sm font-medium
         {instance.status === 'running' ? 'bg-green-100 text-green-800' : ''}
         {instance.status === 'stopped' ? 'bg-gray-100 text-gray-800' : ''}
@@ -434,10 +631,9 @@
           <button onclick={() => action(() => instances.stop(id), 'Stopped')} disabled={actionLoading}
             class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50">Stop</button>
         {/if}
-        <button onclick={() => action(() => instances.rebuild(id), 'Rebuilt')} disabled={actionLoading}
-          class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">Rebuild</button>
-        <button onclick={deleteInstance} disabled={actionLoading}
-          class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50">Delete</button>
+        <!-- Rebuild and Delete deliberately live elsewhere: user instances are long-lived,
+             and both actions are destructive enough not to sit next to Start/Stop.
+             Deleting is done from Settings → Delete an instance. -->
       </div>
     </div>
 
@@ -446,6 +642,11 @@
 
       <!-- Tab bar -->
       <div class="flex border-b">
+        <button
+          onclick={() => detailTab = 'status'}
+          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            {detailTab === 'status' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+        >Status</button>
         <button
           onclick={() => detailTab = 'storage'}
           class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
@@ -463,6 +664,11 @@
           class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
             {detailTab === 'secrets' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Secrets</button>
+        <button
+          onclick={() => { detailTab = 'ssh-keys'; loadAuthorizedKeys(); }}
+          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            {detailTab === 'ssh-keys' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+        >SSH Access</button>
         {#if hasSshx}
           <button
             onclick={() => detailTab = 'sshx'}
@@ -486,22 +692,24 @@
         {/if}
       </div>
 
+      <!-- ── Status tab ── -->
+      {#if detailTab === 'status'}
+        <StatusTab
+          instanceId={id}
+          instanceStatus={instance?.status ?? 'stopped'}
+          createdAt={instance.created_at}
+        />
+      {/if}
+
       <!-- ── Storage tab ── -->
       {#if detailTab === 'storage'}
         {#if storageInfo}
-          <div class="flex items-center gap-2 px-6 pt-4">
-            {#if storageInfo.persistence_mode === 'ephemeral'}
-              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Ephemeral</span>
-              <span class="text-sm text-gray-500">All storage is instance-local. Data is lost on rebuild or delete.</span>
-            {:else}
-              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Persistent</span>
-              <span class="text-sm text-gray-500">Volumes survive rebuilds. Only delete destroys data.</span>
-            {/if}
-          </div>
           <StorageTab
             instanceId={id}
             instanceStatus={instance?.status ?? 'stopped'}
             storageVolumes={storageInfo.volumes}
+            persistenceMode={storageInfo.persistence_mode}
+            {homeDir}
           />
         {:else}
           <div class="p-6">
@@ -699,6 +907,110 @@
         </div>
       {/if}
 
+      <!-- ── SSH Access tab ── -->
+      {#if detailTab === 'ssh-keys'}
+        <div class="p-6 space-y-4">
+          <div>
+            <h3 class="text-base font-semibold mb-1">SSH Access</h3>
+            <p class="text-sm text-gray-500">
+              Public keys registered for this instance's owner. Adding a key writes it to
+              <code class="bg-gray-100 px-1 rounded">authorized_keys</code> in the running instance
+              (root and the terminal user), so you can connect right away without a rebuild.
+            </p>
+          </div>
+
+          {#if instance.ip_address}
+            <div class="p-3 bg-gray-50 rounded font-mono text-sm">
+              ssh {template?.terminal_user || 'root'}@{instance.ip_address}
+            </div>
+          {/if}
+
+          {#if authorizedKeysLoading}
+            <p class="text-sm text-gray-500">Loading keys…</p>
+          {:else}
+            {#if ownerKeys.length === 0}
+              <p class="text-sm text-gray-500">
+                No public key registered. Add one from your profile — or ask an admin to add it in
+                <span class="font-medium">Admin → Users → Keys</span>.
+              </p>
+            {:else}
+              <div class="space-y-2">
+                {#each ownerKeys as key}
+                  <div class="flex items-center gap-3 p-3 bg-gray-50 rounded border">
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-medium">{key.name}</p>
+                      <code class="block text-xs text-gray-500 font-mono truncate">{key.public_key}</code>
+                    </div>
+                    {#if key.present}
+                      <span class="text-xs text-green-700 bg-green-100 rounded px-2 py-1 shrink-0">Installed</span>
+                    {:else}
+                      <button
+                        onclick={() => installAuthorizedKey(key)}
+                        disabled={instance.status !== 'running' || installingKeyId === key.id}
+                        class="px-3 py-1.5 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap shrink-0"
+                      >
+                        {installingKeyId === key.id ? 'Adding…' : `Add ${key.name}'s key`}
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <div class="border-t pt-4">
+              {#if !showAdminKeys}
+                <button
+                  onclick={() => showAdminKeys = true}
+                  class="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm"
+                >
+                  Add another user's key
+                </button>
+                <p class="text-xs text-gray-400 mt-2">
+                  Grant a server administrator SSH access to this instance — useful when asking for help.
+                </p>
+              {:else}
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-sm font-medium">Server administrators</h4>
+                  <button onclick={() => showAdminKeys = false} class="text-xs text-gray-400 hover:text-gray-600">Hide</button>
+                </div>
+                {#if adminKeys.length === 0}
+                  <p class="text-sm text-gray-500">No administrator has registered a public key.</p>
+                {:else}
+                  <div class="space-y-2">
+                    {#each adminKeys as key}
+                      <div class="flex items-center gap-3 p-3 bg-gray-50 rounded border">
+                        <div class="min-w-0 flex-1">
+                          <p class="text-sm font-medium">
+                            {key.owner_name || key.owner_email}
+                            <span class="text-xs font-normal text-gray-500">— {key.name}</span>
+                          </p>
+                          <code class="block text-xs text-gray-500 font-mono truncate">{key.public_key}</code>
+                        </div>
+                        {#if key.present}
+                          <span class="text-xs text-green-700 bg-green-100 rounded px-2 py-1 shrink-0">Installed</span>
+                        {:else}
+                          <button
+                            onclick={() => installAuthorizedKey(key)}
+                            disabled={instance.status !== 'running' || installingKeyId === key.id}
+                            class="px-3 py-1.5 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm whitespace-nowrap shrink-0"
+                          >
+                            {installingKeyId === key.id ? 'Adding…' : 'Add key'}
+                          </button>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            </div>
+
+            {#if instance.status !== 'running'}
+              <p class="text-xs text-gray-400">Start the instance to install a key into authorized_keys.</p>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+
       <!-- ── SSHX tab ── -->
       {#if detailTab === 'sshx'}
         <div class="p-6">
@@ -767,6 +1079,28 @@
                 <span class="text-sm text-gray-500">Not connected</span>
               </div>
             {/if}
+
+            {#if tsNeedsInstall}
+              <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded">
+                <p class="text-sm text-amber-800">{tsProblem}</p>
+                <p class="text-xs text-amber-700 mt-1">
+                  Installs the tailscale mixin and logs the machine in with the current auth key.
+                </p>
+                {#if tsStatus?.login_output}
+                  <p class="text-xs font-semibold text-amber-800 mt-3">What Tailscale said</p>
+                  <pre class="mt-1 p-2 bg-white/70 border border-amber-200 rounded text-xs text-gray-800 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{tsStatus.login_output}</pre>
+                  <p class="text-xs text-amber-700 mt-2">
+                    A key rejected here is usually single-use and already spent by another machine —
+                    a duplicated instance needs a <b>reusable</b> auth key. An admin sets it in
+                    <a href="/admin" class="underline">Admin → Settings</a>.
+                  </p>
+                {/if}
+                <button onclick={installTailscale} disabled={tsInstalling}
+                  class="mt-3 px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm">
+                  {tsInstalling ? 'Installing…' : (tsStatus?.installed ? 'Reinstall Tailscale' : 'Install Tailscale')}
+                </button>
+              </div>
+            {/if}
           </div>
 
           <div class="border-t pt-6">
@@ -807,8 +1141,6 @@
       <!-- ── OpenVSCode tab ── -->
       {#if detailTab === 'openvscode'}
         {@const vsHost = (tsStatus?.connected && tsStatus.dns_name) ? tsStatus.dns_name : instance.ip_address}
-        {@const termUser = template?.terminal_user || 'root'}
-        {@const workspaceDir = (() => { try { const dirs = JSON.parse(template?.persistence_dirs ?? '[]') as {path: string}[]; return dirs[0]?.path ?? '/workspace'; } catch { return '/workspace'; } })()}
         <div class="p-6 space-y-4">
           <h3 class="text-base font-semibold">OpenVSCode Server</h3>
 
@@ -817,8 +1149,8 @@
             <div>
               <p class="text-xs text-gray-500 mb-2">Open in browser</p>
               <div class="flex items-center gap-2">
-                <div class="flex-1 p-2 bg-gray-50 rounded font-mono text-sm break-all">http://{vsHost}:3463</div>
-                <a href={`http://${vsHost}:3463`} target="_blank" rel="noopener noreferrer"
+                <div class="flex-1 p-2 bg-gray-50 rounded font-mono text-sm break-all">http://{vsHost}:3463/?folder={homeDir}</div>
+                <a href={`http://${vsHost}:3463/?folder=${encodeURIComponent(homeDir)}`} target="_blank" rel="noopener noreferrer"
                   class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm whitespace-nowrap">
                   Open ↗
                 </a>
@@ -829,11 +1161,11 @@
             {#if tsStatus?.connected && tsStatus.dns_name}
               <div>
                 <p class="text-xs text-gray-500 mb-2">Open in VSCode Desktop</p>
-                <a href={`vscode://vscode-remote/ssh-remote+${termUser}@${tsStatus.dns_name}${workspaceDir}`}
+                <a href={`vscode://vscode-remote/ssh-remote+${termUser}@${tsStatus.dns_name}${homeDir}`}
                   class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm">
                   Open in VSCode Desktop
                 </a>
-                <p class="text-xs text-gray-400 mt-1">Connects via SSH to <span class="font-mono">{termUser}@{tsStatus.dns_name}</span></p>
+                <p class="text-xs text-gray-400 mt-1">Connects via SSH to <span class="font-mono">{termUser}@{tsStatus.dns_name}</span> and opens <span class="font-mono">{homeDir}</span></p>
                 <p class="text-xs text-gray-400 mt-1">Opens in existing window? Set <span class="font-mono">"window.openFoldersInNewWindow": "on"</span> in VS Code settings.</p>
               </div>
             {/if}

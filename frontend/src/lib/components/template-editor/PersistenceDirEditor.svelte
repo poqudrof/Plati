@@ -8,7 +8,7 @@
   let { dirs = $bindable([]) }: { dirs: PersistenceDir[] } = $props();
 
   function addDir() {
-    dirs = [...dirs, { path: '/workspace', size: '20GB', pool: '' }];
+    dirs = [...dirs, { path: '/home/ubuntu', size: '20GB', pool: '' }];
   }
 
   function removeDir(index: number) {
@@ -26,7 +26,7 @@
         type="text"
         value={dir.path}
         oninput={(e) => { dirs[i].path = (e.target as HTMLInputElement).value; dirs = dirs; }}
-        placeholder="/workspace"
+        placeholder="/home/ubuntu"
         class="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs font-mono bg-gray-50 focus:bg-white focus:border-primary outline-none"
       />
       <input

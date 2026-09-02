@@ -3,8 +3,8 @@
   import MachineKeysSection from '$lib/components/MachineKeysSection.svelte';
   import ApiKeysSection from '$lib/components/ApiKeysSection.svelte';
   import { browser } from '$app/environment';
-  import { users } from '$lib/api';
-  import type { Secret, UserPreferences } from '$lib/api/types';
+  import { users, instances } from '$lib/api';
+  import type { Secret, UserPreferences, Instance } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   let secrets: Secret[] = $state([]);
@@ -13,6 +13,12 @@
   let prefs: UserPreferences | null = $state(null);
   let savingMachineKey = $state(false);
   let savingTailscale = $state(false);
+  let myInstances: Instance[] = $state([]);
+  // Deleting is irreversible and this is the only place it can be done, so it is gated
+  // on typing the instance name rather than a confirm() that is dismissed by reflex.
+  let deleteCandidate: Instance | null = $state(null);
+  let deleteConfirmName = $state('');
+  let deleting = $state(false);
 
   async function loadSecrets() {
     secrets = await users.listSecrets();
@@ -67,6 +73,35 @@
     }
   }
 
+  async function loadInstances() {
+    try {
+      myInstances = await instances.list();
+    } catch (e: any) {
+      addNotification('error', e.message);
+    }
+  }
+
+  function startDelete(inst: Instance) {
+    deleteCandidate = inst;
+    deleteConfirmName = '';
+  }
+
+  async function confirmDelete() {
+    if (!deleteCandidate || deleteConfirmName !== deleteCandidate.name) return;
+    deleting = true;
+    try {
+      await instances.delete(deleteCandidate.id);
+      addNotification('success', `Instance "${deleteCandidate.name}" deleted`);
+      deleteCandidate = null;
+      deleteConfirmName = '';
+      await loadInstances();
+    } catch (e: any) {
+      addNotification('error', e.message);
+    } finally {
+      deleting = false;
+    }
+  }
+
   async function removeSecret(id: number) {
     await users.deleteSecret(id);
     await loadSecrets();
@@ -76,6 +111,7 @@
   if (browser) {
     loadSecrets();
     loadPrefs();
+    loadInstances();
   }
 </script>
 
@@ -193,6 +229,65 @@
         <input bind:value={newSecretValue} type="password" placeholder="Secret value" class="input w-full text-sm" />
         <button onclick={addSecret} class="btn-primary btn-sm">Add Secret</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ─── Delete an instance ─────────────────────────────────── -->
+  <section>
+    <div class="card-static p-6 border-red-200">
+      <div class="flex items-start gap-3 mb-5">
+        <div class="bg-red-50 rounded-xl p-2.5 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Delete an Instance</h2>
+          <p class="text-sm text-gray-500 leading-relaxed mt-0.5">
+            Workspaces are long-lived, so deleting one lives here rather than on the instance page.
+            This <strong>permanently destroys</strong> the instance and its volumes. It cannot be undone.
+          </p>
+        </div>
+      </div>
+
+      {#if myInstances.length === 0}
+        <p class="text-sm text-gray-400 py-2">No instances.</p>
+      {:else}
+        <div class="space-y-2">
+          {#each myInstances as inst (inst.id)}
+            <div class="px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-200">
+              <div class="flex justify-between items-center gap-3">
+                <div class="min-w-0">
+                  <a href={`/instances/${inst.id}`} class="text-sm font-medium text-gray-700 hover:text-primary truncate block">{inst.name}</a>
+                  <span class="text-xs text-gray-400 font-mono">{inst.incus_name} &middot; {inst.status}</span>
+                </div>
+                {#if deleteCandidate?.id !== inst.id}
+                  <button onclick={() => startDelete(inst)} class="btn-danger btn-sm shrink-0">Delete</button>
+                {:else}
+                  <button onclick={() => { deleteCandidate = null; }} class="text-xs text-gray-400 hover:text-gray-600 shrink-0">Cancel</button>
+                {/if}
+              </div>
+
+              {#if deleteCandidate?.id === inst.id}
+                <div class="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                  <p class="text-xs text-red-600">
+                    Type <span class="font-mono font-semibold">{inst.name}</span> to confirm. All data on its volumes is destroyed.
+                  </p>
+                  <div class="flex gap-2">
+                    <input bind:value={deleteConfirmName} placeholder={inst.name}
+                      class="input flex-1 font-mono text-sm" />
+                    <button onclick={confirmDelete}
+                      disabled={deleting || deleteConfirmName !== inst.name}
+                      class="btn-danger btn-sm shrink-0 disabled:opacity-50">
+                      {deleting ? 'Deleting…' : 'Delete permanently'}
+                    </button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </section>
 </div>

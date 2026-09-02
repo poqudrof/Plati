@@ -1,7 +1,7 @@
-# Test Plan: Repo Files Copied to Workspace
+# Test Plan: Repo Files Copied into the Instance
 
-**Goal:** Verify that files from `config/repos/` are correctly bind-mounted and copied into `/workspace/`
-when an instance is created with a template that uses `repos:`.
+**Goal:** Verify that files from `config/repos/` are correctly bind-mounted and copied to each
+repo's `dest` when an instance is created with a template that uses `repos:`.
 
 **Background:** `attachReposDirAndBuildCmds` binds the host `reposDir` into the instance at `/plati-repos`,
 then prepends `cp` commands to `firstInitCmds`. It looks up each repo by name in the `git_repos` DB table;
@@ -43,11 +43,11 @@ called when returning early). The mock needs an `attachedHostPaths []string` fie
 
 1. Create a temp `reposDir` containing `myrepo/` with a dummy file (`hello.txt`). No DB row for the repo.
 2. Construct harness with `reposDir` set to that temp dir.
-3. Seed DB: insert template with `repos: [{"name":"myrepo","dest":"/workspace/myrepo"}]`.
+3. Seed DB: insert template with `repos: [{"name":"myrepo","dest":"/home/ubuntu/myrepo"}]`.
 4. `POST /api/v1/instances` with that template ID; wait for `status=running`.
 5. Assert:
    - `h.mock.attachedHostPaths` contains `reposDir`.
-   - `h.mock.runCommands` contains a command slice matching `["bash","-c","cp -rp /plati-repos/myrepo /workspace/myrepo"]`.
+   - `h.mock.runCommands` contains a command slice matching `["bash","-c","cp -rp /plati-repos/myrepo /home/ubuntu/myrepo"]`.
    - `h.mock.runCommands` does **not** contain any `git remote set-url` command.
 
 ### `TestReposCopiedOnCreate_WithDBRecord` — DB-driven path
@@ -55,12 +55,12 @@ called when returning early). The mock needs an `attachedHostPaths []string` fie
 Same as above, but also seed `git_repos` with `name=myrepo, ssh_url=git@github.com:org/myrepo.git, clone_status=ready`.
 
 5. Assert:
-   - `h.mock.runCommands` contains `cp -rp /plati-repos/myrepo /workspace/myrepo`.
-   - `h.mock.runCommands` contains `cd /workspace/myrepo && git remote set-url origin git@github.com:org/myrepo.git`.
+   - `h.mock.runCommands` contains `cp -rp /plati-repos/myrepo /home/ubuntu/myrepo`.
+   - `h.mock.runCommands` contains `cd /home/ubuntu/myrepo && git remote set-url origin git@github.com:org/myrepo.git`.
 
 ### `TestReposSkippedWhenDirMissing`
 
-Template has `repos: [{"name":"ghost","dest":"/workspace/ghost"}]`. No DB row. No dir on disk.
+Template has `repos: [{"name":"ghost","dest":"/home/ubuntu/ghost"}]`. No DB row. No dir on disk.
 
 5. Assert:
    - `h.mock.runCommands` contains no `cp` or `git remote` commands.
@@ -101,14 +101,14 @@ Delete any leftover instance whose name starts with `repo-test-` so re-runs don'
 5.  Poll until running
       GET /api/v1/instances/<id> every 5s, up to 120s → status="running"
       fail on timeout
-6.  Verify workspace via Incus CLI
-      incus exec <incus_name> -- ls /workspace/AI-state-art-public
+6.  Verify the copied repo via Incus CLI
+      incus exec <incus_name> -- ls /home/ubuntu/AI-state-art-public
         pass if exit 0
-      incus exec <incus_name> -- test -f /workspace/AI-state-art-public/package.json
+      incus exec <incus_name> -- test -f /home/ubuntu/AI-state-art-public/package.json
         pass if exit 0
-      incus exec <incus_name> -- test -f /workspace/AI-state-art-public/README.md
+      incus exec <incus_name> -- test -f /home/ubuntu/AI-state-art-public/README.md
         pass if exit 0
-      incus exec <incus_name> -- test -d /workspace/AI-state-art-public/app
+      incus exec <incus_name> -- test -d /home/ubuntu/AI-state-art-public/app
         pass if exit 0
 7.  Cleanup
       DELETE /api/v1/instances/<id>

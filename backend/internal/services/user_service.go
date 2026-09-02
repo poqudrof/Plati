@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -70,6 +71,26 @@ func (s *UserService) UpdateUser(id int64, name, role string) error {
 	return queries.UpdateUser(s.db, id, name, role)
 }
 
+// MinPasswordLength is the floor the setup wizard already enforces; admin-set
+// passwords follow the same rule.
+const MinPasswordLength = 8
+
+// SetPassword replaces a user's password. Used by admins editing an account —
+// no knowledge of the current password is required.
+func (s *UserService) SetPassword(id int64, password string) error {
+	if len(password) < MinPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+	}
+	if _, err := queries.GetUserByID(s.db, id); err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return queries.SetUserPassword(s.db, id, string(hash))
+}
+
 func (s *UserService) CreateUser(email, name, role, password string) (*models.User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -92,12 +113,34 @@ func (s *UserService) ListSSHKeys(userID int64) ([]models.SSHKey, error) {
 	return queries.ListSSHKeys(s.db, userID)
 }
 
+// ErrInvalidPublicKey is returned when a submitted public key is not in the
+// OpenSSH authorized_keys format. Handlers map it to 400.
+var ErrInvalidPublicKey = errors.New("invalid SSH public key")
+
+// NormalizeSSHPublicKey validates an authorized_keys-formatted public key and
+// returns it on a single line (type, key, optional comment).
+func NormalizeSSHPublicKey(publicKey string) (string, error) {
+	pub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(publicKey)))
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidPublicKey, err)
+	}
+	normalized := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+	if comment != "" {
+		normalized += " " + comment
+	}
+	return normalized, nil
+}
+
 func (s *UserService) CreateSSHKey(userID int64, name, publicKey string) (*models.SSHKey, error) {
-	id, err := queries.CreateSSHKey(s.db, userID, name, publicKey)
+	normalized, err := NormalizeSSHPublicKey(publicKey)
 	if err != nil {
 		return nil, err
 	}
-	return &models.SSHKey{ID: id, UserID: userID, Name: name, PublicKey: publicKey}, nil
+	id, err := queries.CreateSSHKey(s.db, userID, name, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return &models.SSHKey{ID: id, UserID: userID, Name: name, PublicKey: normalized}, nil
 }
 
 func (s *UserService) DeleteSSHKey(id, userID int64) error {

@@ -415,3 +415,116 @@ first_init_commands:
 		t.Error("docker mixin command should appear in template")
 	}
 }
+
+func TestNormalizeRunAs(t *testing.T) {
+	cases := map[string]string{
+		"":        MixinRunAsRoot,
+		"root":    MixinRunAsRoot,
+		"user":    MixinRunAsUser,
+		"nobody":  MixinRunAsRoot, // unknown values degrade to root
+		"USER":    MixinRunAsRoot, // case-sensitive on purpose
+	}
+	for in, want := range cases {
+		if got := normalizeRunAs(in, "test"); got != want {
+			t.Errorf("normalizeRunAs(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCommandsForRootMixinIsUnchanged(t *testing.T) {
+	m := MixinYAML{RunAs: MixinRunAsRoot, PostCreateCommands: []string{"apt-get update -y"}}
+	got := m.commandsFor("docker", "ubuntu")
+	if len(got) != 1 || got[0] != "apt-get update -y" {
+		t.Errorf("root mixin commands were rewritten: %v", got)
+	}
+}
+
+func TestCommandsForUserMixinWrapsInLoginShell(t *testing.T) {
+	m := MixinYAML{RunAs: MixinRunAsUser, PostCreateCommands: []string{"curl -fsSL https://example/install.sh | bash"}}
+	got := m.commandsFor("claude-code", "ubuntu")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(got))
+	}
+	want := `su -l ubuntu -c 'curl -fsSL https://example/install.sh | bash'`
+	if got[0] != want {
+		t.Errorf("got  %s\nwant %s", got[0], want)
+	}
+}
+
+// A command containing single quotes must survive the wrapping intact.
+func TestCommandsForUserMixinEscapesQuotes(t *testing.T) {
+	m := MixinYAML{RunAs: MixinRunAsUser, PostCreateCommands: []string{`echo 'hi there' > ~/f`}}
+	got := m.commandsFor("x", "dev")
+	want := `su -l dev -c 'echo '\''hi there'\'' > ~/f'`
+	if got[0] != want {
+		t.Errorf("got  %s\nwant %s", got[0], want)
+	}
+	// The wrapper must not leave an unbalanced quote.
+	if strings.Count(got[0], "'")%2 != 0 {
+		t.Errorf("unbalanced quoting: %s", got[0])
+	}
+}
+
+// Without a terminal_user there is nobody to drop to; the mixin stays on root.
+func TestCommandsForUserMixinFallsBackToRoot(t *testing.T) {
+	m := MixinYAML{RunAs: MixinRunAsUser, PostCreateCommands: []string{"install-something"}}
+	for _, user := range []string{"", "root"} {
+		got := m.commandsFor("claude-code", user)
+		if got[0] != "install-something" {
+			t.Errorf("terminal_user %q: expected unwrapped command, got %s", user, got[0])
+		}
+	}
+}
+
+// MixinSetupSteps drives re-applying a single mixin to a live instance (the instance
+// page's "Install Tailscale" button), so it must produce the same thing creation does:
+// file pushes first, then the commands, wrapped per the mixin's run_as.
+func TestMixinSetupSteps_FilesThenWrappedCommands(t *testing.T) {
+	dir := t.TempDir()
+	mixinsDir := filepath.Join(dir, "mixins")
+	if err := os.Mkdir(mixinsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mixinsDir, "install.sh"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	mixinYAML := `name: Tool mixin
+run_as: user
+files:
+  - src: install.sh
+    dest: /root/install.sh
+    mode: "0755"
+post_create_commands:
+  - sh /root/install.sh
+`
+	if err := os.WriteFile(filepath.Join(mixinsDir, "tool.yaml"), []byte(mixinYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewTemplateService(nil, "")
+	if err := s.LoadMixinsFromDir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	steps := s.MixinSetupSteps([]string{"tool"}, "ubuntu")
+	if len(steps) != 2 {
+		t.Fatalf("expected 1 file push + 1 command, got %d steps", len(steps))
+	}
+	if steps[0].FileDest != "/root/install.sh" {
+		t.Errorf("file push must come first, got %+v", steps[0])
+	}
+	want := `su -l ubuntu -c 'sh /root/install.sh'`
+	if got := strings.Join(steps[1].Cmd, " "); !strings.Contains(got, want) {
+		t.Errorf("command step = %q, want it to contain %q", got, want)
+	}
+	if !strings.Contains(steps[1].Label, "tool") {
+		t.Errorf("command step should be labelled with the mixin name, got %q", steps[1].Label)
+	}
+}
+
+func TestMixinSetupSteps_UnknownMixinYieldsNothing(t *testing.T) {
+	s := NewTemplateService(nil, "")
+	if steps := s.MixinSetupSteps([]string{"nope"}, "ubuntu"); len(steps) != 0 {
+		t.Errorf("unknown mixin should produce no steps, got %d", len(steps))
+	}
+}

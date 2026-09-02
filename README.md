@@ -118,15 +118,17 @@ config/
 
 ```
 Select template → Validate → Select server (first-fit)
-  → Create storage volume (/workspace)
+  → Create persistent volume(s) (/home/ubuntu by default)
   → Create Incus instance (image + profiles + limits)
   → Attach volume
   → Start instance → SSH connection info
 ```
 
-**Rebuild** preserves workspace: stop → detach volume → delete → recreate → reattach → start.
+**Rebuild** preserves the persistent volume: stop → detach volume → delete → recreate → reattach → start.
 
-**Auto-sleep**: background worker stops instances idle for more than `sleep_timeout` (default: 4h).
+**Auto-sleep**: a background worker stops instances whose timer has run out — `sleep_timeout`
+(default: 4h), overridable or switched off per instance from the **Status** tab. The timer
+counts from the last start, not from actual use.
 
 ## API Overview
 

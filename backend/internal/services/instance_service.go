@@ -7,8 +7,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -66,7 +68,7 @@ type persistenceDir struct {
 }
 
 // deviceNameFromPath derives an Incus device name from a mount path.
-// e.g. "/workspace" → "workspace", "/home/ubuntu" → "home-ubuntu"
+// e.g. "/home/ubuntu" → "home-ubuntu", "/data" → "data"
 func deviceNameFromPath(path string) string {
 	path = strings.TrimPrefix(path, "/")
 	path = strings.ReplaceAll(path, "/", "-")
@@ -74,6 +76,35 @@ func deviceNameFromPath(path string) string {
 		return "vol"
 	}
 	return path
+}
+
+// shellQuote wraps a value in single quotes for safe interpolation into a /bin/sh script.
+func shellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
+// defaultPersistenceDirs is what a template without a `persistence` block gets: a single
+// volume on the login user's home, sized from resources.disk. Persisting the home is the
+// convention every template follows — it is where repos, dotfiles and tool caches live.
+func defaultPersistenceDirs(terminalUser string, resources map[string]string) []persistenceDir {
+	diskSize := 20
+	if sizeStr, ok := resources["disk"]; ok {
+		fmt.Sscanf(sizeStr, "%dGB", &diskSize)
+	}
+	return []persistenceDir{{
+		Path: defaultPersistencePath(terminalUser),
+		Size: fmt.Sprintf("%dGB", diskSize),
+		Pool: "default",
+	}}
+}
+
+// defaultPersistencePath is the home of the login user, or /root when the template declares
+// no terminal_user (root is then the only account).
+func defaultPersistencePath(terminalUser string) string {
+	if terminalUser == "" {
+		return "/root"
+	}
+	return "/home/" + terminalUser
 }
 
 // buildSecretsEnv decrypts global user secrets and (optionally) instance-specific secrets,
@@ -229,6 +260,21 @@ func (s *InstanceService) attachReposDirAndBuildCmds(client incus.IncusClient, i
 	return cmds
 }
 
+// templateIncusConfig decodes the Incus config keys a template requires (merged from
+// its mixins and its own incus_config block). A malformed value is ignored rather than
+// failing instance creation.
+func templateIncusConfig(t *models.Template) map[string]string {
+	if t.IncusConfig == "" || t.IncusConfig == "{}" {
+		return nil
+	}
+	var cfg map[string]string
+	if err := json.Unmarshal([]byte(t.IncusConfig), &cfg); err != nil {
+		log.Printf("warning: template %s: invalid incus_config: %v", t.Slug, err)
+		return nil
+	}
+	return cfg
+}
+
 func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, error) {
 	// Get template
 	tmpl, err := queries.GetTemplate(s.db, req.TemplateID)
@@ -271,7 +317,7 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 	incusName := fmt.Sprintf("plati-%d-%s", req.UserID, sanitizeName(req.Name))
 
 	// Build config
-	config := incus.BuildInstanceConfig(resources)
+	config := incus.BuildInstanceConfig(resources, templateIncusConfig(tmpl))
 
 	// Inject global secrets as environment variables (instanceID=0 for new instance)
 	secretsEnv := s.buildSecretsEnv(req.UserID, 0, tsMode)
@@ -291,13 +337,9 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 		json.Unmarshal([]byte(tmpl.PersistenceDirs), &persistDirs)
 	}
 
-	// If no persistence dirs configured, fall back to legacy single-volume from resources.disk
+	// If no persistence dirs configured, fall back to a single volume on the login user's home.
 	if len(persistDirs) == 0 && tmpl.PersistenceMode != "ephemeral" {
-		diskSize := 20
-		if sizeStr, ok := resources["disk"]; ok {
-			fmt.Sscanf(sizeStr, "%dGB", &diskSize)
-		}
-		persistDirs = []persistenceDir{{Path: "/workspace", Size: fmt.Sprintf("%dGB", diskSize), Pool: "default"}}
+		persistDirs = defaultPersistenceDirs(tmpl.TerminalUser, resources)
 	}
 
 	// Attach volumes based on persistence mode
@@ -489,7 +531,7 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 
 		secretsEnv := s.buildSecretsEnv(req.UserID, 0, tsMode)
 		secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(req.Name)
-		config := incus.BuildInstanceConfig(resources)
+		config := incus.BuildInstanceConfig(resources, templateIncusConfig(tmpl))
 		for k, v := range secretsEnv {
 			config["environment."+k] = v
 		}
@@ -508,11 +550,7 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 			json.Unmarshal([]byte(tmpl.PersistenceDirs), &persistDirs)
 		}
 		if len(persistDirs) == 0 && tmpl.PersistenceMode != "ephemeral" {
-			diskSize := 20
-			if sizeStr, ok := resources["disk"]; ok {
-				fmt.Sscanf(sizeStr, "%dGB", &diskSize)
-			}
-			persistDirs = []persistenceDir{{Path: "/workspace", Size: fmt.Sprintf("%dGB", diskSize), Pool: "default"}}
+			persistDirs = defaultPersistenceDirs(tmpl.TerminalUser, resources)
 		}
 
 		if tmpl.PersistenceMode != "ephemeral" && len(persistDirs) > 0 {
@@ -696,10 +734,6 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 	for _, iv := range instanceVols {
 		_ = client.DetachVolume(inst.IncusName, iv.DeviceName)
 	}
-	// Backward compat: also detach legacy workspace device if not in join table
-	if len(instanceVols) == 0 && inst.VolumeID.Valid {
-		_ = client.DetachVolume(inst.IncusName, "workspace")
-	}
 
 	// Delete instance
 	if err := client.DeleteInstance(inst.IncusName); err != nil {
@@ -716,7 +750,7 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 
 	secretsEnv := s.buildSecretsEnv(userID, id, prefs.TailscaleMode)
 	secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(inst.Name)
-	config := incus.BuildInstanceConfig(resources)
+	config := incus.BuildInstanceConfig(resources, templateIncusConfig(tmpl))
 	for k, v := range secretsEnv {
 		config["environment."+k] = v
 	}
@@ -735,13 +769,6 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 			continue
 		}
 		_ = client.AttachVolume(vol.Pool, vol.Name, inst.IncusName, iv.DeviceName, iv.MountPath)
-	}
-	// Backward compat: reattach legacy workspace volume
-	if len(instanceVols) == 0 && inst.VolumeID.Valid {
-		vol, err := queries.GetVolume(s.db, inst.VolumeID.Int64)
-		if err == nil {
-			_ = client.AttachVolume("default", vol.Name, inst.IncusName, "workspace", "/workspace")
-		}
 	}
 
 	// Reattach repos dir bind mount.
@@ -843,15 +870,6 @@ func (s *InstanceService) Delete(id, userID int64) error {
 		}
 	}
 
-	// Backward compat: delete legacy single workspace volume
-	if len(instanceVols) == 0 && inst.VolumeID.Valid {
-		vol, err := queries.GetVolume(s.db, inst.VolumeID.Int64)
-		if err == nil {
-			_ = client.DeleteVolume("default", vol.Name)
-			queries.DeleteVolume(s.db, vol.ID)
-		}
-	}
-
 	return nil
 }
 
@@ -925,16 +943,6 @@ func (s *InstanceService) GetStorageInfo(id, userID int64) (*InstanceStorageInfo
 		return nil, fmt.Errorf("failed to load volumes: %w", err)
 	}
 
-	// Legacy fallback: instances created before multi-volume support may only have volume_id set.
-	if len(volumes) == 0 && inst.VolumeID.Valid {
-		if v, err := queries.GetVolume(s.db, inst.VolumeID.Int64); err == nil {
-			volumes = []models.VolumeDetail{{
-				VolumeID: v.ID, MountPath: "/workspace", DeviceName: "workspace",
-				VolumeName: v.Name, Pool: v.Pool, SizeGB: v.SizeGB, CreatedAt: v.CreatedAt,
-			}}
-		}
-	}
-
 	return &InstanceStorageInfo{
 		PersistenceMode: tmpl.PersistenceMode,
 		Volumes:         volumes,
@@ -970,19 +978,26 @@ func (s *InstanceService) GetStats(id, userID int64) (*InstanceStats, error) {
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
+	// Stats describe the persistent volume, so ask about the path it is actually mounted on
+	// rather than a fixed one — every template picks its own (usually the login user's home).
+	statsPath := "/home"
+	if vols, err := queries.ListInstanceVolumes(s.db, inst.ID); err == nil && len(vols) > 0 {
+		statsPath = vols[0].MountPath
+	}
+
 	// Single shell script: detect git repo, count modified files, measure disk usage.
-	script := `
+	script := fmt.Sprintf(`
+P=%s
 HAS_GIT=no
 GIT_MOD=0
-if git -C /workspace rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if git -C "$P" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   HAS_GIT=yes
-  GIT_MOD=$(git -C /workspace status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  GIT_MOD=$(git -C "$P" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 fi
-DISK=$(du -sh /workspace 2>/dev/null | awk '{print $1}')
-[ -z "$DISK" ] && DISK=$(du -sh /home 2>/dev/null | awk '{print $1}')
+DISK=$(du -sh "$P" 2>/dev/null | awk '{print $1}')
 [ -z "$DISK" ] && DISK=unknown
-printf "has_git=%s\ngit_modified=%s\ndisk_used=%s\n" "$HAS_GIT" "$GIT_MOD" "$DISK"
-`
+printf "has_git=%%s\ngit_modified=%%s\ndisk_used=%%s\n" "$HAS_GIT" "$GIT_MOD" "$DISK"
+`, shellQuote(statsPath))
 	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", script})
 	if err != nil {
 		// Instance may not be fully ready; return empty rather than error
@@ -1178,6 +1193,22 @@ type TailscaleStatusResult struct {
 	Connected   bool   `json:"connected"`
 	DNSName     string `json:"dns_name"`
 	MachineName string `json:"machine_name"`
+	// Installed reports whether the tailscale CLI is present at all, and DaemonActive
+	// whether tailscaled is running. Together with Connected they tell apart the three
+	// ways Tailscale can be unusable: never installed, installed but dead, logged out.
+	Installed    bool `json:"installed"`
+	DaemonActive bool `json:"daemon_active"`
+	// LoginOutput carries what `tailscale up` actually said when the machine is
+	// still logged out after an install. Empty when connected.
+	LoginOutput string `json:"login_output,omitempty"`
+}
+
+// tskeyPattern matches a Tailscale auth key, so one never reaches the UI or the
+// logs through a command's output.
+var tskeyPattern = regexp.MustCompile(`tskey-[A-Za-z0-9-]+`)
+
+func redactTailscaleKeys(s string) string {
+	return tskeyPattern.ReplaceAllString(s, "tskey-<redacted>")
 }
 
 // GetTailscaleStatus returns the Tailscale machine's Magic DNS name and connection status.
@@ -1200,7 +1231,9 @@ func (s *InstanceService) GetTailscaleStatus(id, userID int64) (*TailscaleStatus
 
 	// Collapse whitespace so the grep works regardless of whether tailscale
 	// emits compact JSON ("DNSName":"...") or spaced JSON ("DNSName": "...").
-	script := `JSON=$(tailscale status --json 2>/dev/null | tr -d ' \n'); DNS=$(echo "$JSON" | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4); HOST=$(echo "$JSON" | grep -o '"HostName":"[^"]*"' | head -1 | cut -d'"' -f4); DNS=$(echo "$DNS" | sed 's/\.$//' ); echo "dns=$DNS"; echo "host=$HOST"`
+	script := `CLI=0; command -v tailscale >/dev/null 2>&1 && CLI=1
+	DAEMON=0; pgrep -x tailscaled >/dev/null 2>&1 && DAEMON=1
+	JSON=$(tailscale status --json 2>/dev/null | tr -d ' \n'); DNS=$(echo "$JSON" | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4); HOST=$(echo "$JSON" | grep -o '"HostName":"[^"]*"' | head -1 | cut -d'"' -f4); DNS=$(echo "$DNS" | sed 's/\.$//' ); echo "dns=$DNS"; echo "host=$HOST"; echo "cli=$CLI"; echo "daemon=$DAEMON"`
 	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", script})
 	if err != nil {
 		log.Printf("tailscale-status exec %s: %v", inst.IncusName, err)
@@ -1223,24 +1256,356 @@ func (s *InstanceService) GetTailscaleStatus(id, userID int64) (*TailscaleStatus
 			}
 		case "host":
 			result.MachineName = strings.TrimSpace(v)
+		case "cli":
+			result.Installed = strings.TrimSpace(v) == "1"
+		case "daemon":
+			result.DaemonActive = strings.TrimSpace(v) == "1"
 		}
 	}
 	return result, nil
 }
 
-// Duplicate creates a new instance using the same template as the source,
-// then deep-copies volume data from source to destination.
+// InstallTailscale (re)applies the tailscale mixin to a running instance: it refreshes
+// the secrets env file so the current auth key is available, pushes the mixin's files and
+// runs its commands. Used from the instance page when Tailscale is missing, its daemon is
+// down, or the machine is logged out — typically because no auth key existed at create
+// time. It returns the status observed afterwards.
+func (s *InstanceService) InstallTailscale(id, userID int64) (*TailscaleStatusResult, error) {
+	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+	if inst.Status != "running" {
+		return nil, fmt.Errorf("instance not running")
+	}
+	client, err := s.clientForInstance(inst)
+	if err != nil {
+		return nil, err
+	}
+
+	prefs, _ := s.prefSvc.Get(inst.UserID)
+	secretsEnv := s.buildSecretsEnv(inst.UserID, inst.ID, prefs.TailscaleMode)
+	secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(inst.Name)
+	if secretsEnv["TAILSCALE_AUTH_KEY"] == "" {
+		return nil, fmt.Errorf("no Tailscale auth key available: set one in your secrets, or ask an admin to configure the platform key")
+	}
+
+	terminalUser := ""
+	if tmpl, err := queries.GetTemplate(s.db, inst.TemplateID); err == nil {
+		terminalUser = tmpl.TerminalUser
+	}
+
+	// Secrets first: the mixin's last command reads TAILSCALE_AUTH_KEY from the env file.
+	steps := incus.BuildSecretsEnvSteps(secretsEnv)
+	steps = append(steps, s.templateSvc.MixinSetupSteps([]string{"tailscale"}, terminalUser)...)
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("tailscale mixin not loaded on this server")
+	}
+	s.runSetupSteps(client, inst.IncusName, steps, nil)
+
+	status, err := s.GetTailscaleStatus(id, userID)
+	if err != nil || status.Connected {
+		return status, err
+	}
+
+	// The mixin's login step ends in "|| true" so a bad key never fails a create,
+	// which also means a rejected login leaves no trace anywhere. Still logged out
+	// means we owe the caller a reason: run the login once more with its output
+	// captured. The key is read from the env file, never put on the command line.
+	out, runErr := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c",
+		`. /etc/profile.d/plati-env.sh; tailscale up --auth-key="$TAILSCALE_AUTH_KEY" --hostname="${PLATI_TAILSCALE_HOSTNAME:-$(hostname)}" 2>&1; echo "exit=$?"`})
+	if runErr != nil {
+		out += "\n" + runErr.Error()
+	}
+	out = redactTailscaleKeys(strings.TrimSpace(out))
+	log.Printf("tailscale login %s: %s", inst.IncusName, out)
+
+	// The retry may itself have logged the machine in.
+	status, err = s.GetTailscaleStatus(id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !status.Connected {
+		status.LoginOutput = out
+	}
+	return status, nil
+}
+
+// RenameOptions selects how far a rename propagates. Both are opt-in: one stops
+// the instance, the other changes the machine's identity inside the OS.
+type RenameOptions struct {
+	// Container renames the Incus container to plati-{user_id}-{hostname}.
+	// Incus requires a stopped instance, so a running one is restarted.
+	Container bool `json:"rename_container"`
+	// SystemHostname renames the machine inside Ubuntu. Needs the instance
+	// running — there is no exec into a stopped container.
+	SystemHostname bool `json:"rename_system_hostname"`
+}
+
+// tailnetHostnameScript refreshes the tailnet hostname on a running instance:
+// the env file, so a later rebuild keeps it, and a live `tailscale set`.
+// {{H}} is the sanitized hostname ([a-z0-9-]), so interpolation is safe.
+const tailnetHostnameScript = `F=/etc/profile.d/plati-env.sh; if [ -f "$F" ]; then sed -i '/^export PLATI_TAILSCALE_HOSTNAME=/d' "$F"; echo 'export PLATI_TAILSCALE_HOSTNAME="{{H}}"' >> "$F"; fi; tailscale set --hostname={{H}} 2>&1 || true`
+
+// systemHostnameScript renames the machine inside Ubuntu. /etc/hostname is what
+// survives a restart; the /etc/hosts line is what keeps sudo from warning
+// "unable to resolve host"; hostnamectl (or plain hostname, when hostnamed is
+// not reachable) applies it to the running system without a reboot.
+const systemHostnameScript = `
+echo '{{H}}' > /etc/hostname
+if grep -q '^127\.0\.1\.1' /etc/hosts 2>/dev/null; then sed -i 's/^127\.0\.1\.1.*/127.0.1.1 {{H}}/' /etc/hosts; else echo '127.0.1.1 {{H}}' >> /etc/hosts; fi
+hostnamectl set-hostname '{{H}}' 2>/dev/null || hostname '{{H}}' 2>/dev/null || true`
+
+// RenameResult reports a rename together with what it managed to apply, so the
+// UI can say whether the Incus container followed the display name.
+type RenameResult struct {
+	*models.Instance
+	// ContainerRenamed is true when incus_name changed too; ContainerRenameError
+	// carries why it did not, when the caller asked for it.
+	ContainerRenamed     bool   `json:"container_renamed"`
+	ContainerRenameError string `json:"container_rename_error,omitempty"`
+	// Restarted is true when the instance was stopped and started again to let
+	// Incus rename it.
+	Restarted bool `json:"restarted"`
+	// SystemHostname is the hostname reported from inside the instance after the
+	// rename, when one was asked for. Empty when it was not, or unreachable.
+	SystemHostname string `json:"system_hostname,omitempty"`
+}
+
+// MarshalJSON emits the instance's fields plus the rename outcome. Instance
+// defines MarshalJSON and embedding promotes it, so without this override the
+// three fields above would silently vanish from the response.
+func (r RenameResult) MarshalJSON() ([]byte, error) {
+	base, err := json.Marshal(r.Instance)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	fields["container_renamed"] = r.ContainerRenamed
+	fields["restarted"] = r.Restarted
+	if r.ContainerRenameError != "" {
+		fields["container_rename_error"] = r.ContainerRenameError
+	}
+	if r.SystemHostname != "" {
+		fields["system_hostname"] = r.SystemHostname
+	}
+	return json.Marshal(fields)
+}
+
+// renameContainer renames the Incus container to match the new display name.
+// Incus refuses to rename a running instance, so a running one is stopped and
+// started again — the caller must have asked for this explicitly.
+//
+// The stored volumes keep their original names: they are attached by device
+// name and renaming them would mean detach/rename/reattach, which risks the
+// data for a cosmetic gain.
+func (s *InstanceService) renameContainer(inst *models.Instance, client incus.IncusClient, hostname string) (restarted bool, err error) {
+	newIncusName := fmt.Sprintf("plati-%d-%s", inst.UserID, hostname)
+	if newIncusName == inst.IncusName {
+		return false, nil
+	}
+
+	taken, err := queries.InstanceIncusNameTaken(s.db, inst.ServerID, inst.ID, newIncusName)
+	if err != nil {
+		return false, fmt.Errorf("check container name: %w", err)
+	}
+	if taken {
+		return false, fmt.Errorf("container name %q is already used on this server", newIncusName)
+	}
+
+	wasRunning := inst.Status == "running"
+	if wasRunning {
+		if err := client.StopInstance(inst.IncusName); err != nil {
+			return false, fmt.Errorf("stop before rename: %w", err)
+		}
+		queries.UpdateInstanceStatus(s.db, inst.ID, "stopped")
+	}
+
+	renameErr := client.RenameInstance(inst.IncusName, newIncusName)
+	if renameErr == nil {
+		if err := queries.UpdateInstanceIncusName(s.db, inst.ID, inst.UserID, newIncusName); err != nil {
+			// The container moved but the row did not: every later call would
+			// address a container that no longer exists, so put it back.
+			if backErr := client.RenameInstance(newIncusName, inst.IncusName); backErr != nil {
+				log.Printf("rename instance %d: DB update failed (%v) AND rollback failed (%v) — incus_name is now stale", inst.ID, err, backErr)
+			}
+			renameErr = fmt.Errorf("record new container name: %w", err)
+		} else {
+			inst.IncusName = newIncusName
+		}
+	}
+
+	if wasRunning {
+		// Start again whether or not the rename worked — the instance was
+		// running when the user asked, and it should still be running after.
+		if startErr := client.StartInstance(inst.IncusName); startErr != nil {
+			log.Printf("rename instance %d: restart %s: %v", inst.ID, inst.IncusName, startErr)
+		} else {
+			restarted = true
+			queries.UpdateInstanceStatus(s.db, inst.ID, "running")
+			inst.Status = "running"
+			if ip, ipErr := incus.GetInstanceIP(client, inst.IncusName); ipErr == nil {
+				queries.UpdateInstanceIP(s.db, inst.ID, ip)
+			}
+		}
+	}
+
+	return restarted, renameErr
+}
+
+// Rename changes an instance's display name and propagates it to the tailnet.
+//
+// The name that matters on the network is carried by two things:
+//
+//   - environment.PLATI_TAILSCALE_HOSTNAME in the Incus config, so a later
+//     Rebuild brings the instance back up under the new hostname;
+//   - a live `tailscale set --hostname` when the instance is running, so the
+//     tailnet picks up the change immediately.
+//
+// inst.IncusName does not follow unless renameContainer is set: it is the
+// identity every later call addresses the container by, and Incus requires a
+// stopped instance to change it. See renameContainer for that path.
+//
+// The DB rename is committed first; Incus and Tailscale propagation is
+// best-effort so a stopped or unreachable instance still gets renamed.
+func (s *InstanceService) Rename(id, userID int64, newName string, opts RenameOptions) (*RenameResult, error) {
+	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	hostname := sanitizeName(newName)
+	if hostname == "" {
+		return nil, fmt.Errorf("invalid name %q: leaves no usable characters for a tailnet hostname", newName)
+	}
+	if newName == inst.Name && !opts.Container && !opts.SystemHostname {
+		return &RenameResult{Instance: inst}, nil
+	}
+
+	// Reject a hostname already taken by another of this user's instances:
+	// Tailscale would silently suffix it (-1, -2, ...) and the two names would
+	// no longer match what Plati displays.
+	siblings, err := queries.ListInstancesByUser(s.db, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	for _, sib := range siblings {
+		if sib.ID != id && sanitizeName(sib.Name) == hostname {
+			return nil, fmt.Errorf("tailnet hostname %q is already used by instance %q", hostname, sib.Name)
+		}
+	}
+
+	if err := queries.UpdateInstanceName(s.db, id, userID, newName); err != nil {
+		return nil, fmt.Errorf("update instance name: %w", err)
+	}
+	inst.Name = newName
+	result := &RenameResult{Instance: inst}
+
+	server, err := queries.GetServer(s.db, inst.ServerID)
+	if err != nil {
+		log.Printf("rename instance %d: server not found: %v", id, err)
+		return result, nil
+	}
+	client, err := s.pool.GetClient(server.Name)
+	if err != nil {
+		log.Printf("rename instance %d: get incus client: %v", id, err)
+		return result, nil
+	}
+
+	// Rename the container first: everything below addresses it by name.
+	if opts.Container {
+		restarted, err := s.renameContainer(inst, client, hostname)
+		result.Restarted = restarted
+		if err != nil {
+			log.Printf("rename instance %d: rename container: %v", id, err)
+			result.ContainerRenameError = err.Error()
+		} else {
+			result.ContainerRenamed = true
+		}
+	}
+
+	if err := client.UpdateInstanceConfig(inst.IncusName, map[string]string{
+		"environment.PLATI_TAILSCALE_HOSTNAME": hostname,
+	}); err != nil {
+		log.Printf("rename instance %d: update PLATI_TAILSCALE_HOSTNAME on %s: %v", id, inst.IncusName, err)
+	}
+
+	if inst.Status == "running" {
+		script := strings.ReplaceAll(tailnetHostnameScript, "{{H}}", hostname)
+		if opts.SystemHostname {
+			script += strings.ReplaceAll(systemHostnameScript, "{{H}}", hostname)
+			script += "\necho \"system_hostname=$(hostname)\""
+		}
+
+		// A container that was just restarted for the rename is up but not yet
+		// accepting exec, so one attempt is not enough. Without the restart the
+		// first try succeeds and the loop costs nothing.
+		attempts := 1
+		if result.Restarted {
+			attempts = 5
+		}
+		for attempt := 1; ; attempt++ {
+			out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", script})
+			if err == nil {
+				for _, line := range strings.Split(out, "\n") {
+					if v, ok := strings.CutPrefix(strings.TrimSpace(line), "system_hostname="); ok {
+						result.SystemHostname = v
+					}
+				}
+				break
+			}
+			if attempt >= attempts {
+				log.Printf("rename instance %d: apply hostname on %s: %v (%s)", id, inst.IncusName, err, strings.TrimSpace(out))
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	return result, nil
+}
+
+// Duplicate copies an instance the caller owns, keeping it for themselves.
 func (s *InstanceService) Duplicate(id, userID int64) (*models.Instance, error) {
 	orig, err := queries.GetInstanceByUser(s.db, id, userID)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
+	return s.duplicateInto(orig, userID)
+}
 
+// DuplicateForUser copies any instance, whoever owns it, and assigns the copy
+// to targetUserID. Admin-only path — ownership of the source is not checked.
+// A zero targetUserID keeps the copy with the source's owner.
+func (s *InstanceService) DuplicateForUser(id, targetUserID int64) (*models.Instance, error) {
+	orig, err := queries.GetInstance(s.db, id)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+	if targetUserID == 0 {
+		targetUserID = orig.UserID
+	}
+	if _, err := queries.GetUserByID(s.db, targetUserID); err != nil {
+		return nil, fmt.Errorf("target user not found: %w", err)
+	}
+	return s.duplicateInto(orig, targetUserID)
+}
+
+// duplicateInto creates a new instance using the same template as the source,
+// owned by targetUserID, then deep-copies volume data from source to destination.
+func (s *InstanceService) duplicateInto(orig *models.Instance, targetUserID int64) (*models.Instance, error) {
 	// Create a fresh instance with empty volumes.
 	dst, err := s.Create(CreateInstanceRequest{
-		Name:       orig.Name + "-copy",
+		Name:       s.freeInstanceName(targetUserID, orig.Name+"-copy"),
 		TemplateID: orig.TemplateID,
-		UserID:     userID,
+		UserID:     targetUserID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create duplicate: %w", err)
@@ -1286,6 +1651,26 @@ func (s *InstanceService) Duplicate(id, userID int64) (*models.Instance, error) 
 	}
 
 	return dst, nil
+}
+
+// freeInstanceName returns base, or base-2, base-3… — the first name the target
+// user does not already use. The Incus name is derived from the owner and the
+// display name, and (incus_name, server_id) is unique, so duplicating twice
+// into the same account would otherwise collide.
+func (s *InstanceService) freeInstanceName(userID int64, base string) string {
+	existing, err := queries.ListInstancesByUser(s.db, userID)
+	if err != nil {
+		return base
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, inst := range existing {
+		taken[sanitizeName(inst.Name)] = true
+	}
+	name := base
+	for i := 2; taken[sanitizeName(name)]; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	return name
 }
 
 // IncusConfigUpdate holds the editable Incus config fields for an instance.
@@ -1354,7 +1739,12 @@ func (s *InstanceService) GetIncusDetail(instanceID int64) (*incus.IncusDetail, 
 // logFn, if non-nil, receives progress lines: STEP:N/M:label before each step,
 // OUT:line for each output line, and WARN:msg on failure.
 func (s *InstanceService) runPhase2Setup(client incus.IncusClient, incusName string, publicKeys, privateKeys []string, secrets map[string]string, terminalUser string, cfg incus.SetupConfig, logFn func(string)) {
-	steps := incus.BuildSetupSteps(cfg)
+	s.runSetupSteps(client, incusName, incus.BuildSetupSteps(cfg), logFn)
+}
+
+// runSetupSteps executes setup steps in order, reporting progress through logFn.
+// A failing step is logged and the run continues, as during instance creation.
+func (s *InstanceService) runSetupSteps(client incus.IncusClient, incusName string, steps []incus.SetupStep, logFn func(string)) {
 	total := len(steps)
 
 	for i, step := range steps {

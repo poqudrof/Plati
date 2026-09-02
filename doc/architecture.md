@@ -76,7 +76,7 @@ The `internal/incus/` package abstracts Incus server communication:
 - **Client** (`client.go`): Wraps the Incus Go SDK with TLS mutual authentication. Implements the `IncusClient` interface for testability.
 - **Pool** (`pool.go`): Thread-safe map of named Incus clients. Supports multi-server deployments.
 - **Instance operations** (`instances.go`): Build instance config from templates (resource limits). SSH key injection and setup commands via exec. Get instance IP addresses.
-- **Volume operations** (`volumes.go`): Create, attach, detach, and delete storage volumes for persistent `/workspace` data.
+- **Volume operations** (`volumes.go`): Create, attach, detach, and delete the storage volumes that hold an instance's persistent data (the login user's home by default).
 
 ### Instance Lifecycle
 
@@ -90,13 +90,13 @@ User selects template
   Select server (first-fit with capacity)
         │
         ▼
-  Create storage volume (workspace)
+  Create persistent volume(s)
         │
         ▼
   Create Incus instance (image + profiles + limits)
         │
         ▼
-  Attach volume at /workspace
+  Attach volume at its mount path
         │
         ▼
   Start instance → return SSH connection info

@@ -175,6 +175,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(db, userSvc, instanceSvc, templateSvc)
 	managedKeyHandler := handlers.NewManagedKeyHandler(managedKeySvc)
 	healthHandler := handlers.NewHealthHandler(db)
+	sleepHandler := handlers.NewSleepHandler(sleepSvc)
 	setupHandler := handlers.NewSetupHandler(db, cfg, *configPath)
 	terminalHandler := handlers.NewTerminalHandler(db, pool, instanceSvc.CreationLogs())
 	prefsHandler := handlers.NewPreferencesHandler(prefSvc)
@@ -200,6 +201,7 @@ func main() {
 		AdminSettingsHandler: adminSettingsHandler,
 		RepoHandler:          repoHandler,
 		StorageHandler:       storageHandler,
+		SleepHandler:         sleepHandler,
 		APIKeyHandler:        apiKeyHandler,
 		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
 		JWTSecret:            cfg.Auth.JWTSecret,

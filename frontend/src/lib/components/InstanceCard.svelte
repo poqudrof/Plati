@@ -1,17 +1,18 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import type { Instance, InstanceStats, Template } from '$lib/api/types';
+  import type { Instance, InstanceStats, User } from '$lib/api/types';
   import { instances } from '$lib/api';
   import { addNotification } from '$lib/stores/notifications';
   import { goto } from '$app/navigation';
+  import DuplicateInstanceButton from './DuplicateInstanceButton.svelte';
 
-  let { instance, template, onRefresh = () => {} }: {
+  let { instance, users = [], onRefresh = () => {} }: {
     instance: Instance;
-    template?: Template;
+    /** Admin only: accounts a duplicate can be assigned to. */
+    users?: User[];
     onRefresh?: () => void;
   } = $props();
 
-  let showRebuildConfirm = $state(false);
 
   let loading = $state(false);
   let stats = $state<InstanceStats | null>(null);
@@ -43,32 +44,6 @@
     }
   }
 
-  async function duplicate() {
-    loading = true;
-    try {
-      const newInst = await instances.duplicate(instance.id);
-      addNotification('success', `Duplicating as "${newInst.name}" — this may take a minute`);
-      onRefresh();
-    } catch (e: any) {
-      addNotification('error', e.message);
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function deleteInstance() {
-    if (!confirm(`Delete "${instance.name}"?\n\nThis permanently destroys the instance and all workspace data. This cannot be undone.`)) return;
-    loading = true;
-    try {
-      await instances.delete(instance.id);
-      addNotification('success', 'Instance deleted');
-      onRefresh();
-    } catch (e: any) {
-      addNotification('error', e.message);
-    } finally {
-      loading = false;
-    }
-  }
 </script>
 
 <div class="bg-white rounded-lg border p-5 space-y-4 flex flex-col">
@@ -132,12 +107,12 @@
         Start
       </button>
     {/if}
-    <button
-      onclick={duplicate}
+    <DuplicateInstanceButton
+      instanceId={instance.id}
+      {users}
+      defaultUserId={instance.user_id}
       disabled={loading}
-      class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded text-sm hover:bg-gray-200 disabled:opacity-50 border">
-      Duplicate
-    </button>
+      onDone={onRefresh} />
   </div>
 
   <!-- Instance management: stop / rebuild / delete with descriptions -->
@@ -153,69 +128,17 @@
           Stop
         </button>
         <p class="text-xs text-gray-500 leading-snug pt-1">
-          Pauses the instance. All data — including the <code class="bg-gray-100 px-0.5 rounded">/workspace</code> volume — is fully preserved.
+          Pauses the instance. All data — including the persistent volume — is fully preserved.
         </p>
       </div>
     {/if}
 
-    <div class="flex items-start gap-3">
-      <button
-        onclick={() => {
-          if (template?.persistence_mode === 'normal') {
-            showRebuildConfirm = true;
-          } else {
-            action(() => instances.rebuild(instance.id), 'Instance rebuilt');
-          }
-        }}
-        disabled={loading}
-        class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 shrink-0">
-        Rebuild
-      </button>
-      <p class="text-xs text-gray-500 leading-snug pt-1">
-        Reinstalls the OS from the original template.
-        {#if template?.persistence_mode === 'normal'}
-          <strong class="text-gray-700">Persistent volumes are preserved — <code class="bg-gray-100 px-0.5 rounded">rebuild_commands</code> run instead of <code class="bg-gray-100 px-0.5 rounded">first_init_commands</code>.</strong>
-        {:else}
-          <strong class="text-gray-700"><code class="bg-gray-100 px-0.5 rounded">/workspace</code> is a persistent volume — your data is preserved regardless of the image.</strong>
-        {/if}
-      </p>
-    </div>
-
-    <div class="flex items-start gap-3">
-      <button
-        onclick={deleteInstance}
-        disabled={loading}
-        class="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50 shrink-0">
-        Delete
-      </button>
-      <p class="text-xs text-red-600 leading-snug pt-1">
-        <strong>Permanently destroys</strong> the instance and all workspace data.
-        This cannot be undone.
-      </p>
-    </div>
+    <p class="text-xs text-gray-500 leading-snug">
+      Workspaces are long-lived. Deleting one is done from
+      <a href="/settings" class="text-primary hover:text-primary-dark underline">Settings</a>.
+    </p>
   </div>
 
 </div>
 
-<!-- Rebuild confirmation modal (for normal persistence) -->
-{#if showRebuildConfirm}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
-      <h2 class="text-lg font-bold mb-2">Rebuild "{instance.name}"?</h2>
-      <div class="space-y-2 text-sm text-gray-700 mb-4">
-        <p>The OS will be reinstalled from the original template image.</p>
-        <p class="font-medium text-green-700">Persistent volumes (e.g. <code class="bg-gray-100 px-1 rounded">/workspace</code>) are NOT wiped — your files are safe.</p>
-        <p><code class="bg-gray-100 px-1 rounded">rebuild_commands</code> will run instead of <code class="bg-gray-100 px-1 rounded">first_init_commands</code>.</p>
-      </div>
-      <div class="flex justify-end gap-3">
-        <button onclick={() => showRebuildConfirm = false} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-        <button
-          onclick={() => { showRebuildConfirm = false; action(() => instances.rebuild(instance.id), 'Instance rebuilt'); }}
-          class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Rebuild
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+

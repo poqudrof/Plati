@@ -1,7 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
-  import type { Template, Server, User, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult, ApiKey, GeneratedApiKeyResult } from '$lib/api/types';
+  import type { Template, Server, User, SSHKey, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult, ApiKey, GeneratedApiKeyResult } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   let tab: 'templates' | 'servers' | 'users' | 'ssh-keys' | 'settings' | 'repos' = $state('templates');
@@ -21,7 +21,7 @@
   let expandedTemplate: number | null = $state(null);
 
   // User editing
-  let editingUser: { id: number; name: string; role: string } | null = $state(null);
+  let editingUser: { id: number; name: string; role: string; email: string; password: string } | null = $state(null);
   let creatingUser: { email: string; name: string; password: string; isAdmin: boolean } | null = $state(null);
 
   // Managed SSH Keys
@@ -36,6 +36,12 @@
   let userKeys: UserSSHKey[] = $state([]);
   let newUserKeyName = $state('');
   let userKeyGenerating = $state(false);
+
+  // Per-user public keys (authorized_keys — remote SSH access to their instances)
+  let userPublicKeys: SSHKey[] = $state([]);
+  let newPublicKeyName = $state('');
+  let newPublicKeyValue = $state('');
+  let publicKeyAdding = $state(false);
 
   // Per-user API key management
   let managingApiKeysForUser: User | null = $state(null);
@@ -102,16 +108,22 @@
 
   // User actions
   function startEditUser(user: User) {
-    editingUser = { id: user.id, name: user.name, role: user.role };
+    editingUser = { id: user.id, name: user.name, role: user.role, email: user.email, password: '' };
   }
 
   async function saveUser() {
     if (!editingUser) return;
+    const password = editingUser.password.trim();
+    if (password && password.length < 8) {
+      addNotification('error', 'Password must be at least 8 characters');
+      return;
+    }
     try {
-      await admin.users.update(editingUser.id, editingUser.name, editingUser.role);
+      await admin.users.update(editingUser.id, editingUser.name, editingUser.role, password);
+      const changedPassword = password !== '';
       editingUser = null;
       await loadUsers();
-      addNotification('success', 'User updated');
+      addNotification('success', changedPassword ? 'User updated — password changed' : 'User updated');
     } catch (e: any) { addNotification('error', e.message); }
   }
 
@@ -211,8 +223,36 @@
   async function openUserKeys(user: User) {
     managingKeysForUser = user;
     newUserKeyName = '';
+    newPublicKeyName = '';
+    newPublicKeyValue = '';
     try {
-      userKeys = await admin.users.listKeys(user.id);
+      [userKeys, userPublicKeys] = await Promise.all([
+        admin.users.listKeys(user.id),
+        admin.users.listPublicKeys(user.id)
+      ]);
+    } catch (e: any) { addNotification('error', e.message); }
+  }
+
+  async function addPublicKey() {
+    if (!managingKeysForUser || !newPublicKeyName.trim() || !newPublicKeyValue.trim()) return;
+    publicKeyAdding = true;
+    try {
+      await admin.users.addPublicKey(managingKeysForUser.id, newPublicKeyName.trim(), newPublicKeyValue.trim());
+      newPublicKeyName = '';
+      newPublicKeyValue = '';
+      userPublicKeys = await admin.users.listPublicKeys(managingKeysForUser.id);
+      addNotification('success', 'Public key added — applied to instances on next create or rebuild');
+    } catch (e: any) { addNotification('error', e.message); }
+    finally { publicKeyAdding = false; }
+  }
+
+  async function deletePublicKey(keyId: number) {
+    if (!managingKeysForUser) return;
+    if (!confirm('Delete this public key? The user loses SSH access on next rebuild.')) return;
+    try {
+      await admin.users.deletePublicKey(managingKeysForUser.id, keyId);
+      userPublicKeys = await admin.users.listPublicKeys(managingKeysForUser.id);
+      addNotification('success', 'Public key deleted');
     } catch (e: any) { addNotification('error', e.message); }
   }
 
@@ -857,7 +897,7 @@
             <textarea
               rows="4"
               class="w-full px-3 py-2 border rounded font-mono text-sm"
-              placeholder="apk add --no-cache git&#10;mkdir -p /workspace"
+              placeholder="apt-get install -y git&#10;mkdir -p /home/ubuntu/src"
               value={parsePostCreateCommands(editingTemplate.post_create_commands)}
               oninput={(e) => { editingTemplate!.post_create_commands = serializePostCreateCommands((e.target as HTMLTextAreaElement).value); }}
             ></textarea>
@@ -913,9 +953,60 @@
 <!-- Manage User Keys Modal -->
 {#if managingKeysForUser}
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) managingKeysForUser = null; }}>
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
       <div class="p-6">
-        <h2 class="text-lg font-bold mb-1">SSH Keys — {managingKeysForUser.email}</h2>
+        <h2 class="text-lg font-bold mb-4">SSH Keys — {managingKeysForUser.email}</h2>
+
+        <h3 class="font-medium text-sm mb-1">Public keys (remote access)</h3>
+        <p class="text-sm text-gray-500 mb-4">
+          Paste the user's own public key (<code class="bg-gray-100 px-1 rounded">~/.ssh/id_ed25519.pub</code>).
+          It is written to <code class="bg-gray-100 px-1 rounded">authorized_keys</code> in their instances so they
+          can SSH in from their machine. Applied on next create or rebuild — an existing running instance can get it
+          immediately from the instance page's SSH Access tab.
+        </p>
+
+        <div class="space-y-3 mb-4">
+          {#each userPublicKeys as key}
+            <div class="p-3 bg-gray-50 rounded border">
+              <div class="flex justify-between items-start">
+                <div class="min-w-0 flex-1">
+                  <span class="font-medium text-sm">{key.name}</span>
+                  <span class="text-xs text-gray-400 ml-2">{new Date(key.created_at).toLocaleDateString()}</span>
+                </div>
+                <button onclick={() => deletePublicKey(key.id)} class="text-red-600 hover:text-red-800 text-sm ml-4 shrink-0">Delete</button>
+              </div>
+              <code class="block text-xs text-gray-500 font-mono truncate mt-2">{key.public_key}</code>
+            </div>
+          {/each}
+          {#if userPublicKeys.length === 0}
+            <p class="text-sm text-gray-500">No public key yet — this user cannot SSH into their instances.</p>
+          {/if}
+        </div>
+
+        <div class="space-y-2 mb-6">
+          <input
+            bind:value={newPublicKeyName}
+            placeholder="Key name (e.g. laptop)"
+            class="w-full px-3 py-2 border rounded text-sm"
+          />
+          <textarea
+            bind:value={newPublicKeyValue}
+            rows="3"
+            placeholder="ssh-ed25519 AAAAC3NzaC1... user@laptop"
+            class="w-full px-3 py-2 border rounded text-sm font-mono"
+          ></textarea>
+          <div class="flex justify-end">
+            <button
+              onclick={addPublicKey}
+              disabled={publicKeyAdding || !newPublicKeyName.trim() || !newPublicKeyValue.trim()}
+              class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark disabled:opacity-50 text-sm"
+            >
+              {publicKeyAdding ? 'Adding…' : 'Add Public Key'}
+            </button>
+          </div>
+        </div>
+
+        <h3 class="font-medium text-sm mb-1 border-t pt-4">Plati-generated keypair (git access)</h3>
         <p class="text-sm text-gray-500 mb-4">
           Generate a keypair on behalf of this user. The private key is stored encrypted on the server
           and injected automatically into their instances. Copy the public key to add to GitHub or a git repo.
@@ -1069,6 +1160,20 @@
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+          </div>
+          <div class="pt-4 border-t">
+            <label for="edit-user-password" class="block text-sm font-medium text-gray-700 mb-1">New password</label>
+            <input
+              id="edit-user-password"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Leave blank to keep the current one"
+              bind:value={editingUser.password}
+              class="w-full px-3 py-2 border rounded" />
+            <p class="text-xs text-gray-500 mt-1">
+              At least 8 characters. Replaces the password for <span class="font-mono">{editingUser.email}</span>
+              immediately — the user is not notified.
+            </p>
           </div>
         </div>
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t">

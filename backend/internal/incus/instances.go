@@ -59,12 +59,14 @@ func BuildSetupSteps(cfg SetupConfig) []SetupStep {
 			Label: fmt.Sprintf("Wait for user %s", cfg.TerminalUser),
 			Cmd:   []string{"/bin/sh", "-c", fmt.Sprintf("for i in $(seq 1 60); do id %s >/dev/null 2>&1 && break; sleep 1; done", cfg.TerminalUser)},
 		})
+		steps = append(steps, buildHomeOwnershipSteps(cfg.TerminalUser)...)
+		steps = append(steps, buildHomeSkeletonSteps(cfg.TerminalUser)...)
 		dir := fmt.Sprintf("/home/%s/.ssh", cfg.TerminalUser)
 		steps = append(steps, buildSSHSetupSteps(dir, cfg.PublicKeys, cfg.PrivateKeyPEMs, cfg.TerminalUser)...)
 	}
 
 	if len(cfg.Secrets) > 0 {
-		steps = append(steps, buildSecretsEnvFileSteps(cfg.Secrets)...)
+		steps = append(steps, BuildSecretsEnvSteps(cfg.Secrets)...)
 	}
 
 	// Push mixin files before lifecycle commands (first init only).
@@ -96,6 +98,9 @@ func BuildSetupSteps(cfg SetupConfig) []SetupStep {
 				},
 			})
 		}
+		// Anything root created under the home during setup (mixins, repo copies,
+		// first_init_commands, the sentinel) is handed back to the terminal user.
+		steps = append(steps, buildHomeContentOwnershipSteps(cfg.TerminalUser)...)
 	} else {
 		for _, cmd := range cfg.RebuildCmds {
 			label := cmd
@@ -117,6 +122,84 @@ func BuildSetupCommands(cfg SetupConfig) [][]string {
 		cmds[i] = s.Cmd
 	}
 	return cmds
+}
+
+// buildHomeOwnershipSteps makes sure the terminal user's home exists and belongs to them
+// before anything is written into it. When a template persists /home/<user>, Incus creates
+// the volume mount point as root:root 0711; a plain "mkdir -p ~/.ssh" would then set up a
+// correct .ssh inside a home the user cannot write to. Ownership is only corrected while
+// the directory is still root-owned, so a home already set up by the image is left alone.
+func buildHomeOwnershipSteps(user string) []SetupStep {
+	if user == "" || user == "root" {
+		return nil
+	}
+	script := fmt.Sprintf(`home=$(getent passwd %[1]s | cut -d: -f6)
+[ -n "$home" ] || home=/home/%[1]s
+mkdir -p "$home"
+if [ -n "$(find "$home" -maxdepth 0 -user root)" ]; then
+  chown %[1]s:%[1]s "$home"
+  chmod 750 "$home"
+fi
+`, user)
+	return []SetupStep{{
+		Label: fmt.Sprintf("Home (%s): ensure ownership", user),
+		Cmd:   []string{"/bin/sh", "-c", script},
+	}}
+}
+
+// buildHomeSkeletonSteps populates a home that a persistent volume mounted over. The image
+// creates the user with /etc/skel copied into /home/<user>, but the volume is attached on
+// top of that directory, so the shell dotfiles are hidden and the user logs into a home
+// with no .bashrc and no .profile — which is where Ubuntu puts ~/.local/bin on PATH.
+// Existing files are never overwritten (cp -n), so this is a no-op on later rebuilds.
+func buildHomeSkeletonSteps(user string) []SetupStep {
+	if user == "" || user == "root" {
+		return nil
+	}
+	script := fmt.Sprintf(`home=$(getent passwd %[1]s | cut -d: -f6)
+[ -n "$home" ] || home=/home/%[1]s
+# Copy the skel entries one at a time: "cp -a /etc/skel/. $home/" would also stamp
+# /etc/skel's own root:root ownership, mode and mtime onto the home directory itself,
+# locking the user out of the home this very function is meant to make usable.
+for f in /etc/skel/.[!.]* /etc/skel/*; do
+  [ -e "$f" ] || continue
+  cp -a -n "$f" "$home/" 2>/dev/null
+  chown -R %[1]s:%[1]s "$home/$(basename "$f")" 2>/dev/null
+done
+# Tools installed by run_as: user mixins land in ~/.local/bin; .profile only covers login
+# shells, so put it on PATH for interactive shells too.
+if ! grep -qs '.local/bin' "$home/.bashrc"; then
+  printf '\n# Added by Plati: tools installed into the user home\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$home/.bashrc"
+  chown %[1]s:%[1]s "$home/.bashrc" 2>/dev/null
+fi
+exit 0
+`, user)
+	return []SetupStep{{
+		Label: fmt.Sprintf("Home (%s): seed shell dotfiles and PATH", user),
+		Cmd:   []string{"/bin/sh", "-c", script},
+	}}
+}
+
+// buildHomeContentOwnershipSteps reassigns the top-level entries of the terminal user's
+// home that setup created as root (repo copies, mixin installs, the sentinel file).
+// Entries already owned by someone else are left untouched.
+func buildHomeContentOwnershipSteps(user string) []SetupStep {
+	if user == "" || user == "root" {
+		return nil
+	}
+	script := fmt.Sprintf(`home=$(getent passwd %[1]s | cut -d: -f6)
+[ -n "$home" ] || home=/home/%[1]s
+[ -d "$home" ] || exit 0
+if [ -n "$(find "$home" -maxdepth 0 -user root)" ]; then
+  chown %[1]s:%[1]s "$home"
+  chmod 750 "$home"
+fi
+find "$home" -mindepth 1 -maxdepth 1 -user root -exec chown -R %[1]s:%[1]s {} +
+`, user)
+	return []SetupStep{{
+		Label: fmt.Sprintf("Home (%s): fix ownership of setup files", user),
+		Cmd:   []string{"/bin/sh", "-c", script},
+	}}
 }
 
 // buildSSHSetupSteps generates labeled exec steps to set up .ssh/ in the given directory.
@@ -179,8 +262,8 @@ func buildSSHSetupSteps(sshDir string, publicKeys, privateKeyPEMs []string, owne
 	return steps
 }
 
-// buildSecretsEnvFileSteps generates labeled exec steps to write /etc/profile.d/plati-env.sh.
-func buildSecretsEnvFileSteps(secrets map[string]string) []SetupStep {
+// BuildSecretsEnvSteps generates labeled exec steps to write /etc/profile.d/plati-env.sh.
+func BuildSecretsEnvSteps(secrets map[string]string) []SetupStep {
 	keys := make([]string, 0, len(secrets))
 	for k := range secrets {
 		keys = append(keys, k)
@@ -227,8 +310,10 @@ func GetInstanceIP(client IncusClient, name string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address found for %s", name)
 }
 
-// BuildInstanceConfig builds Incus config from resource limits.
-func BuildInstanceConfig(resources map[string]string) map[string]string {
+// BuildInstanceConfig builds Incus config from resource limits, then applies the
+// template's own keys. extra comes from the template's incus_config (itself the merge
+// of what its mixins require, e.g. security.nesting for Docker) and wins on conflict.
+func BuildInstanceConfig(resources, extra map[string]string) map[string]string {
 	config := map[string]string{}
 
 	if cpu, ok := resources["cpu"]; ok {
@@ -236,6 +321,10 @@ func BuildInstanceConfig(resources map[string]string) map[string]string {
 	}
 	if mem, ok := resources["memory"]; ok {
 		config["limits.memory"] = mem
+	}
+
+	for k, v := range extra {
+		config[k] = v
 	}
 
 	return config

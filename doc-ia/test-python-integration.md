@@ -37,7 +37,7 @@ Durée : ~60-90 secondes. Nécessite Docker.
 │  │ Plati Server   │    │ Docker Ubuntu 24.04│ │
 │  │ port 8082      │    │ SSH + Node.js + git│ │
 │  │ fresh SQLite   │    │ IP: 172.17.0.x     │ │
-│  │ known password │    │ /workspace mount   │ │
+│  │ known password │    │ home /home/ubuntu  │ │
 │  └───────┬───────┘    └─────────┬──────────┘ │
 │          │  API calls            │ SSH / HTTP  │
 │          └──────────┬────────────┘             │
@@ -62,11 +62,11 @@ Durée : ~60-90 secondes. Nécessite Docker.
 | 06 | `list_instances_via_api` | GET `/api/v1/instances` retourne l'instance avec la bonne IP |
 | 07 | `ssh_connect` | Connexion SSH (paramiko) → `whoami` = `ubuntu` |
 | 08 | `node_version` | `node --version` via SSH → `v22.x` |
-| 09 | `clone_code` | rsync du repo `site-ca` local → `/workspace/site-ca/` dans le container |
+| 09 | `clone_code` | rsync du repo `site-ca` local → `/home/ubuntu/site-ca/` dans le container |
 | 10 | `npm_install` | `npm ci` dans le container → exit 0 |
 | 11 | `start_dev_server` | `setsid npm run dev` → curl 127.0.0.1:3000 → HTTP 200 |
 | 12 | `curl_app` | `requests.get(http://<container_ip>:3000)` → HTTP 200, 63KB HTML |
-| 13 | `workspace_ls` | `ls /workspace/site-ca/` → fichiers du repo visibles |
+| 13 | `workspace_ls` | `ls /home/ubuntu/site-ca/` → fichiers du repo visibles |
 | 14 | `delete_instance_via_api` | DELETE `/api/v1/instances/{id}` → API appelée (HTTP 500 attendu car pas d'Incus réel) |
 
 ## Variables d'environnement

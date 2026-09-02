@@ -1,3 +1,5 @@
 name: Claude Code mixin
+# Installs into the terminal user's home (~/.local/bin), so it must not run as root.
+run_as: user
 post_create_commands:
   - curl -fsSL https://claude.ai/install.sh | bash

@@ -87,9 +87,9 @@ ssh ubuntu@<instance-ip>
 
 - Login succeeds using your assigned SSH key (no password prompt).
 - `whoami` returns `ubuntu`.
-- `/workspace` is mounted and writable:
+- `/home/ubuntu` is the persistent volume, mounted and writable:
   ```bash
-  touch /workspace/test-file && ls /workspace/test-file
+  touch ~/test-file && ls ~/test-file
   ```
 
 ### 2.3 Docker
@@ -123,26 +123,26 @@ Expected: Docker pulls and runs `hello-world`, prints the success message. The `
 
 1. Click the **OpenVSCode** tab.
 2. Under **Open in browser**, the URL `http://<ip>:3463` is shown.
-3. Open it — the OpenVSCode web UI loads with `/workspace` as the default folder.
+3. Open it — the OpenVSCode web UI loads. Open `/home/ubuntu` (the persistent volume).
 4. Create a file in the editor, confirm it persists on disk.
 
 ### 2.7 OpenVSCode Server — VSCode Desktop
 
 1. On the same **OpenVSCode** tab, under **Open in VSCode Desktop**, confirm the button is shown (requires Tailscale to be connected).
-2. Click **Open in VSCode Desktop**. VSCode should open the remote SSH session to `ubuntu@<tailscale-dns-name>` at `/workspace`.
+2. Click **Open in VSCode Desktop**. VSCode should open the remote SSH session to `ubuntu@<tailscale-dns-name>` at `/home/ubuntu`.
 3. The Remote SSH status bar indicator in VSCode shows the host name.
 
-### 2.8 Rebuild (workspace persistence)
+### 2.8 Rebuild (home persistence)
 
 1. Create a sentinel file:
    ```bash
-   echo "rebuild-test" > /workspace/rebuild-marker.txt
+   echo "rebuild-test" > ~/rebuild-marker.txt
    ```
 2. On the instance page, click **Rebuild** and confirm.
 3. Wait for the instance to return to `running`.
 4. SSH back in and verify:
    ```bash
-   cat /workspace/rebuild-marker.txt   # must print "rebuild-test"
+   cat ~/rebuild-marker.txt   # must print "rebuild-test"
    ```
 5. Confirm `first_init_commands` did **not** re-run (no re-install of packages — check `/var/log/apt/history.log` timestamp or absence of a second apt-get run in the rebuild log).
 6. Confirm `rebuild_commands` ran: SSH service is up (`systemctl is-active ssh` → `active`).
@@ -173,5 +173,5 @@ Expected: Docker pulls and runs `hello-world`, prints the success message. The `
 | Tailscale connected | DNS name shown, ping succeeds |
 | OpenVSCode browser | Web UI loads on port 3463 |
 | OpenVSCode Desktop | VSCode Remote SSH session opens |
-| Rebuild persistence | `/workspace/rebuild-marker.txt` survives |
+| Rebuild persistence | `/home/ubuntu/rebuild-marker.txt` survives |
 | Cleanup | Instance and volumes deleted cleanly |

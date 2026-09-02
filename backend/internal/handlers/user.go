@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/homaserver/plati/internal/auth"
@@ -50,6 +51,10 @@ func (h *UserHandler) CreateSSHKey(w http.ResponseWriter, r *http.Request) {
 	}
 	key, err := h.svc.CreateSSHKey(user.ID, req.Name, req.PublicKey)
 	if err != nil {
+		if errors.Is(err, services.ErrInvalidPublicKey) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to add key")
 		return
 	}

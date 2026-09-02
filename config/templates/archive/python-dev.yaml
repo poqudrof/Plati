@@ -24,11 +24,11 @@ cloud_init: |
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /root
       size: 20GB
       pool: default
 
 first_init_commands: []
 
 rebuild_commands:
-  - cd /workspace && git pull --ff-only 2>/dev/null || true
+  - cd /root && git pull --ff-only 2>/dev/null || true

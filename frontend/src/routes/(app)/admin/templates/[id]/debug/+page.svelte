@@ -705,7 +705,7 @@
             <div class="space-y-2">
               {#each persistenceDirs as dir, i}
                 <div class="flex gap-2 items-center">
-                  <input type="text" bind:value={dir.path} placeholder="/workspace" class="flex-1 border rounded px-2 py-1 text-sm font-mono" />
+                  <input type="text" bind:value={dir.path} placeholder="/home/ubuntu" class="flex-1 border rounded px-2 py-1 text-sm font-mono" />
                   <input type="text" bind:value={dir.size} placeholder="20GB" class="w-24 border rounded px-2 py-1 text-sm" />
                   <input type="text" bind:value={dir.pool} placeholder="pool" class="w-24 border rounded px-2 py-1 text-sm" />
                   <button onclick={() => removeDirRow(i)} class="text-red-500 hover:text-red-700 text-sm px-1">×</button>

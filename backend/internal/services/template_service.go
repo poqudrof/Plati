@@ -31,7 +31,9 @@ type MixinFileInfo struct {
 
 // MixinInfo is returned by ListMixins so the frontend knows what mixins are available.
 type MixinInfo struct {
-	Name     string          `json:"name"`
+	Name        string            `json:"name"`
+	RunAs       string            `json:"run_as"`
+	IncusConfig map[string]string `json:"incus_config,omitempty"`
 	Commands []string        `json:"commands"`
 	Files    []MixinFileInfo `json:"files"`
 }
@@ -60,11 +62,61 @@ type resolvedMixinFile struct {
 	Mode    int    // unix file mode (e.g. 0755)
 }
 
+// Mixin run_as values: which account the mixin's commands execute as.
+const (
+	// MixinRunAsRoot is the default: commands run as root, as incus exec provides them.
+	MixinRunAsRoot = "root"
+	// MixinRunAsUser runs the commands as the template's terminal_user. Use it for
+	// tools that install into the user's home (e.g. claude-code writes ~/.local/bin);
+	// run as root they would land in /root and be invisible to the user.
+	MixinRunAsUser = "user"
+)
+
 type MixinYAML struct {
 	Name               string              `yaml:"name"`
+	RunAs              string              `yaml:"run_as,omitempty"`       // "root" (default) | "user"
+	IncusConfig        map[string]string   `yaml:"incus_config,omitempty"` // Incus keys the mixin needs on the instance
 	Files              []MixinFile         `yaml:"files,omitempty"`
 	PostCreateCommands []string            `yaml:"post_create_commands,omitempty"`
 	resolvedFiles      []resolvedMixinFile // populated at load time, not from YAML
+}
+
+// normalizeRunAs validates the declared run_as, falling back to root for anything unknown.
+func normalizeRunAs(runAs, source string) string {
+	switch runAs {
+	case MixinRunAsRoot, MixinRunAsUser:
+		return runAs
+	case "":
+		return MixinRunAsRoot
+	default:
+		log.Printf("warning: mixin %s: unknown run_as %q, running as root", source, runAs)
+		return MixinRunAsRoot
+	}
+}
+
+// runAsUser wraps cmd in a login shell for user, so the command sees that user's HOME
+// and PATH plus the secrets exported by /etc/profile.d/plati-env.sh. The command is
+// executed by incus exec as a single argv element, so one level of quoting is enough.
+func runAsUser(user, cmd string) string {
+	return fmt.Sprintf("su -l %s -c '%s'", user, strings.ReplaceAll(cmd, "'", `'\''`))
+}
+
+// commandsFor returns the mixin's commands ready to run: wrapped for the terminal user
+// when the mixin declares run_as: user, unchanged otherwise. A template without a
+// terminal_user (or whose terminal user is root) keeps the commands as-is.
+func (m MixinYAML) commandsFor(mixinName, terminalUser string) []string {
+	if m.RunAs != MixinRunAsUser {
+		return m.PostCreateCommands
+	}
+	if terminalUser == "" || terminalUser == "root" {
+		log.Printf("warning: mixin %q declares run_as: user but the template has no terminal_user, running as root", mixinName)
+		return m.PostCreateCommands
+	}
+	out := make([]string, len(m.PostCreateCommands))
+	for i, cmd := range m.PostCreateCommands {
+		out[i] = runAsUser(terminalUser, cmd)
+	}
+	return out
 }
 
 type PersistenceDirYAML struct {
@@ -112,6 +164,7 @@ type TemplateYAML struct {
 	Repos              []RepoRefYAML        `yaml:"repos,omitempty"`
 	HealthChecks       []HealthCheckYAML    `yaml:"health_checks,omitempty"`
 	TailscaleServe     *TailscaleServeYAML  `yaml:"tailscale_serve,omitempty"`
+	IncusConfig        map[string]string    `yaml:"incus_config,omitempty"`
 }
 
 func (s *TemplateService) List(activeOnly bool) ([]models.Template, error) {
@@ -146,7 +199,7 @@ func (s *TemplateService) ListMixins() []MixinInfo {
 	result := make([]MixinInfo, 0, len(names))
 	for _, name := range names {
 		m := s.mixins[name]
-		result = append(result, MixinInfo{Name: name, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)})
+		result = append(result, MixinInfo{Name: name, RunAs: m.RunAs, IncusConfig: m.IncusConfig, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)})
 	}
 	return result
 }
@@ -159,7 +212,7 @@ func (s *TemplateService) GetMixin(name string) (MixinInfo, bool) {
 	if !ok {
 		return MixinInfo{}, false
 	}
-	return MixinInfo{Name: name, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)}, true
+	return MixinInfo{Name: name, RunAs: m.RunAs, IncusConfig: m.IncusConfig, Commands: m.PostCreateCommands, Files: mixinFilesInfo(m)}, true
 }
 
 func mixinFilesInfo(m MixinYAML) []MixinFileInfo {
@@ -230,6 +283,33 @@ func (s *TemplateService) GetMixinFileSteps(names []string) []incus.SetupStep {
 	return steps
 }
 
+// MixinSetupSteps returns the full setup steps for the given mixins — file pushes first,
+// then their commands wrapped according to each mixin's run_as. It is what instance
+// creation runs, exposed so a single mixin can also be (re)applied to a live instance.
+func (s *TemplateService) MixinSetupSteps(names []string, terminalUser string) []incus.SetupStep {
+	steps := s.GetMixinFileSteps(names)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, name := range names {
+		m, ok := s.mixins[name]
+		if !ok {
+			continue
+		}
+		for _, cmd := range m.commandsFor(name, terminalUser) {
+			label := cmd
+			if len(label) > 72 {
+				label = label[:69] + "..."
+			}
+			steps = append(steps, incus.SetupStep{
+				Label: fmt.Sprintf("[%s] %s", name, label),
+				Cmd:   []string{"/bin/sh", "-c", cmd},
+			})
+		}
+	}
+	return steps
+}
+
 // DuplicateTemplate clones template id with a new name and slug.
 func (s *TemplateService) DuplicateTemplate(id int64, newName, newSlug string) (*models.Template, error) {
 	src, err := queries.GetTemplate(s.db, id)
@@ -275,6 +355,9 @@ func (s *TemplateService) LoadMixinsFromDir(dir string) error {
 			log.Printf("warning: parse mixin %s: %v", f, err)
 			continue
 		}
+		stemName := strings.TrimSuffix(filepath.Base(f), ".yaml")
+		m.RunAs = normalizeRunAs(m.RunAs, stemName)
+
 		// Resolve file entries to absolute host paths.
 		// Files are pushed into the instance via PushFile at creation time.
 		for _, mf := range m.Files {
@@ -296,9 +379,8 @@ func (s *TemplateService) LoadMixinsFromDir(dir string) error {
 			})
 		}
 
-		stem := strings.TrimSuffix(filepath.Base(f), ".yaml")
-		newMixins[stem] = m
-		log.Printf("loaded mixin: %s (%d commands)", stem, len(m.PostCreateCommands))
+		newMixins[stemName] = m
+		log.Printf("loaded mixin: %s (%d commands, run_as: %s)", stemName, len(m.PostCreateCommands), m.RunAs)
 	}
 	s.mu.Lock()
 	s.mixins = newMixins
@@ -317,13 +399,22 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 	s.mu.RUnlock()
 
 	var resolvedCmds []string
+	// Mixins contribute the Incus config their tooling needs (Docker wants
+	// security.nesting); the template's own incus_config wins on conflict.
+	resolvedIncusConfig := map[string]string{}
 	for _, name := range ty.Includes {
 		m, ok := mixins[name]
 		if !ok {
 			log.Printf("warning: mixin %q not found, skipping", name)
 			continue
 		}
-		resolvedCmds = append(resolvedCmds, m.PostCreateCommands...)
+		resolvedCmds = append(resolvedCmds, m.commandsFor(name, ty.TerminalUser)...)
+		for k, v := range m.IncusConfig {
+			resolvedIncusConfig[k] = v
+		}
+	}
+	for k, v := range ty.IncusConfig {
+		resolvedIncusConfig[k] = v
 	}
 	resolvedCmds = append(resolvedCmds, ty.PostCreateCommands...)
 
@@ -364,14 +455,18 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 			persistenceDirsJSON = dirsJSON
 		}
 	} else {
-		// Backward compat: derive single workspace dir from resources.disk.
+		// No persistence block: persist the login user's home, sized from resources.disk.
 		diskSize := "20GB"
 		if ty.Resources != nil {
 			if d, ok := ty.Resources["disk"]; ok {
 				diskSize = fmt.Sprintf("%v", d)
 			}
 		}
-		defaultDirs := []PersistenceDirYAML{{Path: "/workspace", Size: diskSize, Pool: "default"}}
+		defaultDirs := []PersistenceDirYAML{{
+			Path: defaultPersistencePath(ty.TerminalUser),
+			Size: diskSize,
+			Pool: "default",
+		}}
 		persistenceDirsJSON, _ = json.Marshal(defaultDirs)
 	}
 
@@ -405,6 +500,8 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		firstInitJSON, _ = json.Marshal(firstInitCmds)
 	}
 
+	incusConfigJSON, _ := json.Marshal(resolvedIncusConfig)
+
 	return &models.Template{
 		Name:               ty.Name,
 		Slug:               ty.Slug,
@@ -422,6 +519,7 @@ func (s *TemplateService) templateFromYAML(data []byte) (*models.Template, error
 		Repos:              string(reposJSON),
 		HealthChecks:       string(healthChecksJSON),
 		TailscaleServe:     tailscaleServeJSON,
+		IncusConfig:        string(incusConfigJSON),
 		IsActive:           true,
 	}, nil
 }

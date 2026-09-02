@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -68,14 +70,27 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 		Role string `json:"role"`
+		// Optional: an empty password leaves the current one untouched.
+		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if req.Password != "" && len(req.Password) < services.MinPasswordLength {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("password must be at least %d characters", services.MinPasswordLength))
+		return
+	}
 	if err := h.userSvc.UpdateUser(id, req.Name, req.Role); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update user")
 		return
+	}
+	if req.Password != "" {
+		if err := h.userSvc.SetPassword(id, req.Password); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to set password")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "updated"})
 }
@@ -155,13 +170,102 @@ func (h *AdminHandler) DeleteUserKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+// User public keys (admin adds a user-provided public key so the user can SSH into
+// their own instances). These land in ~/.ssh/authorized_keys on create/rebuild.
+
+func (h *AdminHandler) ListUserPublicKeys(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	keys, err := h.userSvc.ListSSHKeys(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list public keys")
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+func (h *AdminHandler) AddUserPublicKey(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		Name      string `json:"name"`
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.PublicKey == "" {
+		writeError(w, http.StatusBadRequest, "name and public_key required")
+		return
+	}
+	if _, err := h.userSvc.GetUser(userID); err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	key, err := h.userSvc.CreateSSHKey(userID, req.Name, req.PublicKey)
+	if err != nil {
+		if errors.Is(err, services.ErrInvalidPublicKey) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to add public key")
+		return
+	}
+	writeJSON(w, http.StatusCreated, key)
+}
+
+func (h *AdminHandler) DeleteUserPublicKey(w http.ResponseWriter, r *http.Request) {
+	userID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	keyID, err := parseID(r, "key_id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid key_id")
+		return
+	}
+	if err := h.userSvc.DeleteSSHKey(keyID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete public key")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
 func (h *AdminHandler) ListAllInstances(w http.ResponseWriter, r *http.Request) {
-	instances, err := queries.ListAllInstances(h.db)
+	instances, err := queries.ListAllInstancesWithOwner(h.db)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list instances")
 		return
 	}
 	writeJSON(w, http.StatusOK, instances)
+}
+
+// DuplicateInstance copies any user's instance and assigns the copy to the user
+// given in the body. An omitted user_id keeps the copy with the source's owner.
+func (h *AdminHandler) DuplicateInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	inst, err := h.instanceSvc.DuplicateForUser(id, req.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, inst)
 }
 
 func (h *AdminHandler) CreateInstanceForUser(w http.ResponseWriter, r *http.Request) {

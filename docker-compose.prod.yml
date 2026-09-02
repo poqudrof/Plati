@@ -5,11 +5,17 @@
 #               tailscaled --tun=userspace-networking + Serve 80/443
 #                 │  netstack ne route l'entrant QUE vers 127.0.0.1
 #                 │
-#                 ├─ « frontend »  Vite  0.0.0.0:${APP_PORT}   ┐ network_mode:
-#                 └─ « backend »   Go    127.0.0.1:8080        ┘ service:tailscale
+#                 ├─ « frontend » node server.js  0.0.0.0:${APP_PORT}  ┐ network_mode:
+#                 └─ « backend »  Go              127.0.0.1:8080       ┘ service:tailscale
 #                                          │
 #                                          ▼ 172.31.240.1:8443
 #                                    Incus, sur l'HÔTE
+#
+# SEULE différence de fond avec docker-compose.dev.yml, en plus du tailnet : le
+# frontend est BUILDÉ (adapter-node) au lieu de tourner sous le serveur de dev
+# Vite. Même base de données (volume « plati-data »), même config/plati.yaml,
+# même accès Incus — le mode dev sert à travailler l'UI et les migrations, le
+# mode prod sert les mêmes données en plus rapide et à distance.
 #
 # Contrairement à la recette de tailscale-dev.md, l'application n'est PAS sur
 # l'hôte : les trois conteneurs partagent le namespace réseau de tailscaled, donc
@@ -20,8 +26,8 @@
 #   - aucun port applicatif n'est ouvert sur 0.0.0.0 de l'hôte (le :8080 de la
 #     machine est déjà pris par ClearML — le network_mode: host du compose dev
 #     ne peut pas fonctionner ici) ;
-#   - le backend écoute sur 127.0.0.1 dans le netns : joignable par le proxy Vite,
-#     pas depuis le tailnet ;
+#   - le backend écoute sur 127.0.0.1 dans le netns : joignable par le proxy de
+#     frontend/server.js, pas depuis le tailnet ;
 #   - seul ${APP_PORT} est atteignable directement par le tailnet, en plus des
 #     80/443 servis par Serve.
 #
@@ -38,9 +44,9 @@
 #
 # Prérequis :
 #   - .env.tailscale (TS_AUTHKEY, TS_HOSTNAME, APP_PORT) et .env.plati (PLATI_*)
-#   - frontend/vite.config.ts → server.allowedHosts doit contenir
-#     ${TS_HOSTNAME}.<tailnet>.ts.net, sinon Vite répond « Blocked request »
 #   - tailnet : MagicDNS + HTTPS Certificates activés
+#   (server.allowedHosts de vite.config.ts ne concerne plus que le mode dev :
+#    le build ne passe pas par le serveur de dev Vite.)
 #
 # Usage :
 #   docker compose --env-file .env.tailscale -f docker-compose.prod.yml up -d
@@ -60,9 +66,10 @@
 # ATTENTION aussi : l'étape « serveur Incus » de l'assistant ÉCRASE la liste
 # servers[] du fichier généré — la renseigner, sinon elle est vidée.
 #
-# ATTENTION au port : ${APP_PORT} est répercuté à DEUX endroits — la commande
-# Vite ci-dessous et EN DUR dans deploy/tailscale/serve.json (Tailscale Serve
-# n'interpole pas les variables d'environnement).
+# ATTENTION au port : ${APP_PORT} est répercuté à DEUX endroits — la variable
+# PORT du service « frontend » ci-dessous et EN DUR dans
+# deploy/tailscale/serve.json (Tailscale Serve n'interpole pas les variables
+# d'environnement).
 
 services:
   tailscale:
@@ -137,11 +144,19 @@ services:
     image: node:22-alpine
     container_name: plati-frontend
     working_dir: /workspace/frontend
-    # --host 0.0.0.0 : nécessaire pour que le port publié par le conteneur
-    # tailscale (docker-proxy) atteigne Vite ; 127.0.0.1 suffirait pour Serve.
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port ${APP_PORT:-17231}"
+    # Build SvelteKit (adapter-node) puis service par frontend/server.js, qui
+    # sert build/ et proxifie /api, /auth, /health — WebSockets compris — vers
+    # le backend. C'est la seule vraie différence avec le compose dev.
+    #
+    # --include=dev est OBLIGATOIRE : vite, @sveltejs/kit et l'adapter sont des
+    # devDependencies, et NODE_ENV=production ferait sauter leur installation.
+    # NODE_ENV n'est donc posé qu'au lancement, après le build.
+    command: >
+      sh -c "npm install --include=dev --no-audit --no-fund &&
+             npm run build &&
+             NODE_ENV=production node server.js"
     volumes:
-      - ./frontend:/workspace/frontend      # source
+      - ./frontend:/workspace/frontend      # source (+ build/, gitignoré)
       - frontend-nm:/workspace/frontend/node_modules  # isolated node_modules
     network_mode: "service:tailscale"
     depends_on:
@@ -150,8 +165,13 @@ services:
       backend:
         condition: service_started
     environment:
-      # Même netns que le backend → le proxy Vite passe par la boucle locale.
+      # 0.0.0.0 : nécessaire pour que le port publié par le conteneur tailscale
+      # (docker-proxy) atteigne le serveur ; 127.0.0.1 suffirait pour Serve.
+      HOST: 0.0.0.0
+      PORT: ${APP_PORT:-17231}
+      # Même netns que le backend → le proxy passe par la boucle locale.
       BACKEND_HOST: 127.0.0.1
+      BACKEND_PORT: 8080
     restart: unless-stopped
 
 networks:

@@ -13,7 +13,7 @@ profiles:
 resources:
   cpu: 2                   # vCPU cores
   memory: 4GB              # RAM limit
-  disk: 20GB               # Persistent /workspace volume size
+  disk: 20GB               # Size of the implicit volume when no persistence block
 
 # ── Optional ────────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ terminal_user: ubuntu
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /home/ubuntu
       size: 20GB
 
 # Commands run only on first create (when no sentinel exists).
@@ -65,7 +65,7 @@ resources:
   disk: 10GB
 first_init_commands:
   - apk add --no-cache git curl openssh-client
-  - mkdir -p /workspace`;
+  - mkdir -p /srv/app`;
 
   const pythonExample = `name: Python Dev
 slug: python-dev
@@ -102,7 +102,7 @@ includes:
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /home/ubuntu
       size: 20GB
 first_init_commands:
   - apt-get update -y
@@ -129,7 +129,7 @@ includes:
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /home/ubuntu
       size: 40GB
 first_init_commands:
   - apt-get update -y
@@ -174,6 +174,7 @@ first_init_commands:
     <p class="text-gray-600 text-sm mb-4">Mixins are reusable blocks of <code class="bg-gray-100 px-1 rounded">post_create_commands</code> shared across templates. Instead of copy-pasting install steps, declare a mixin with <code class="bg-gray-100 px-1 rounded">includes</code> and the commands are merged in at import time.</p>
     <div class="bg-white border rounded-lg p-4 space-y-3 text-sm text-gray-600">
       <p><b>Location.</b> Mixin files live in the <code class="bg-gray-100 px-1 rounded">mixins/</code> subdirectory of your templates directory (e.g. <code class="bg-gray-100 px-1 rounded">config/templates/mixins/tailscale.yaml</code>). Each file has a <code class="bg-gray-100 px-1 rounded">name</code> and a <code class="bg-gray-100 px-1 rounded">post_create_commands</code> list.</p>
+      <p><b>Run as.</b> <code class="bg-gray-100 px-1 rounded">run_as</code> selects the account the commands execute as: <code class="bg-gray-100 px-1 rounded">root</code> (the default — package installs, systemd units) or <code class="bg-gray-100 px-1 rounded">user</code>, which wraps each command in a login shell for the template's <code class="bg-gray-100 px-1 rounded">terminal_user</code>. Use <code class="bg-gray-100 px-1 rounded">user</code> for tools that install into the home directory, such as <code class="bg-gray-100 px-1 rounded">claude-code</code>. A template with no <code class="bg-gray-100 px-1 rounded">terminal_user</code> falls back to root.</p>
       <p><b>Include order.</b> Mixin commands are prepended to the template's own <code class="bg-gray-100 px-1 rounded">post_create_commands</code>, in the order listed under <code class="bg-gray-100 px-1 rounded">includes</code>. The template's own commands always run last.</p>
       <p><b>Resolved at import time.</b> Mixins are merged when templates are loaded at startup. The database stores the fully-merged command list — no mixin concept leaks into the instance creation path.</p>
       <p><b>Built-in mixins.</b> <code class="bg-gray-100 px-1 rounded">tailscale</code> — installs Tailscaled and calls <code class="bg-gray-100 px-1 rounded">tailscale up</code> with the instance name as hostname. <code class="bg-gray-100 px-1 rounded">sshx</code> — installs the SSHX binary and registers it as a systemd service. <code class="bg-gray-100 px-1 rounded">docker</code> — installs Docker CE from the official repo. <code class="bg-gray-100 px-1 rounded">nvidia</code> — installs nvidia-container-toolkit and configures the Docker GPU runtime (must be listed after <code class="bg-gray-100 px-1 rounded">docker</code>).</p>
@@ -278,8 +279,8 @@ first_init_commands:
     <div class="bg-white border rounded-lg p-4 space-y-3 text-sm text-gray-600">
       <p><b>Slug must be unique.</b> If you add a template with a slug that already exists, the duplicate will be skipped on reload. Rename the slug or delete the conflicting file to resolve.</p>
       <p><b>Keep setup fast.</b> Long init scripts delay instance startup. For heavy toolchains, consider building a custom Incus image instead.</p>
-      <p><b>Persistence modes.</b> Use <code class="bg-gray-100 px-1 rounded">persistence.mode: normal</code> (default) for persistent workspace volumes that survive rebuilds. Use <code class="bg-gray-100 px-1 rounded">ephemeral</code> for throwaway instances where all storage is wiped on rebuild.</p>
-      <p><b>Workspace volume.</b> In <code class="bg-gray-100 px-1 rounded">normal</code> mode, persistent volumes are mounted per the <code class="bg-gray-100 px-1 rounded">persistence.directories</code> list. A sentinel file distinguishes first init from rebuild.</p>
+      <p><b>Persistence modes.</b> Use <code class="bg-gray-100 px-1 rounded">persistence.mode: normal</code> (default) for persistent volumes that survive rebuilds. Use <code class="bg-gray-100 px-1 rounded">ephemeral</code> for throwaway instances where all storage is wiped on rebuild.</p>
+      <p><b>Persistent volumes.</b> In <code class="bg-gray-100 px-1 rounded">normal</code> mode, volumes are mounted per the <code class="bg-gray-100 px-1 rounded">persistence.directories</code> list. Omit the block entirely and the login user's home (<code class="bg-gray-100 px-1 rounded">/home/&lt;terminal_user&gt;</code>, or <code class="bg-gray-100 px-1 rounded">/root</code>) is persisted, sized from <code class="bg-gray-100 px-1 rounded">resources.disk</code>. A sentinel file distinguishes first init from rebuild.</p>
       <p><b>Profiles.</b> Use Incus profiles to configure networking, storage pools, and device passthrough. The <code class="bg-gray-100 px-1 rounded">default</code> profile provides a bridged network. Add <code class="bg-gray-100 px-1 rounded">docker</code> for Docker support and <code class="bg-gray-100 px-1 rounded">nvidia</code> for GPU passthrough.</p>
       <p><b>GPU setup.</b> Run <code class="bg-gray-100 px-1 rounded">scripts/setup-gpu-profile.sh</code> on the Incus host to create the <code class="bg-gray-100 px-1 rounded">nvidia</code> profile, then use it in your template.</p>
     </div>

@@ -1,4 +1,6 @@
 name: OpenVSCode Server mixin
+# Unpacks into /opt and registers a systemd unit: root.
+run_as: root
 files:
   - src: dist/openvscode-server-v1.109.5-linux-x64.tar.gz
     dest: /root/openvscode-server.tar.gz

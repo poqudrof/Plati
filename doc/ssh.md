@@ -27,7 +27,7 @@ You can add multiple keys (e.g. laptop, desktop, CI).
 | Instance **rebuilt** | Yes — all your current keys at rebuild time |
 | Instance deleted | N/A |
 
-Keys are written once during instance setup. If you add a new key after an instance already exists, it will **not** appear automatically — you need to rebuild the instance (Settings → Rebuild). Rebuilding recreates the container but preserves your `/workspace` volume.
+Keys are written once during instance setup. If you add a new key after an instance already exists, it will **not** appear automatically — you need to rebuild the instance (Settings → Rebuild). Rebuilding recreates the container but preserves your persistent volume (your home directory).
 
 ## How It Works Internally
 

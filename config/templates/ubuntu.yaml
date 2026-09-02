@@ -29,5 +29,5 @@ rebuild_commands:
 persistence:
     mode: normal
     directories:
-        - path: /workspace
+        - path: /home/ubuntu
           size: 20GB

@@ -15,6 +15,18 @@ export interface SSHKey {
   created_at: string;
 }
 
+// A registered public key as seen from an instance, with install status.
+export interface InstanceAuthorizedKey {
+  id: number;
+  name: string;
+  public_key: string;
+  present: boolean;
+  /** Whose key this is — the instance owner, or a server administrator. */
+  owner_name: string;
+  owner_email?: string;
+  is_admin: boolean;
+}
+
 // Plati-generated keypair owned by a user (advanced users).
 export interface UserSSHKey {
   id: number;
@@ -136,6 +148,10 @@ export interface MixinFileInfo {
 
 export interface MixinInfo {
   name: string;
+  /** Account the mixin's commands run as: "root" (default) or "user" (the template's terminal_user). */
+  run_as: 'root' | 'user';
+  /** Incus instance config keys this mixin requires (e.g. security.nesting for Docker). */
+  incus_config?: Record<string, string>;
   commands: string[];
   files: MixinFileInfo[];
 }
@@ -168,6 +184,47 @@ export interface Instance {
   last_active_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Auto-stop policy. 0 minutes means "follow the platform default". */
+  sleep_disabled: boolean;
+  sleep_timeout_minutes: number;
+}
+
+/** Auto-stop (sleep) policy of one instance, resolved against the platform default. */
+export interface SleepSettings {
+  disabled: boolean;
+  /** Per-instance override in minutes; 0 = follow default_minutes. */
+  timeout_minutes: number;
+  default_minutes: number;
+  effective_minutes: number;
+  /** How often the sleep worker sweeps — the worst-case overshoot on the deadline. */
+  check_interval_minutes: number;
+  status: string;
+  last_active_at: string | null;
+  /** When the worker becomes eligible to stop it; null when nothing is scheduled. */
+  sleeps_at: string | null;
+}
+
+/** An instance as listed by the admin dashboard: owner and template resolved. */
+export interface AdminInstance extends Instance {
+  user_email: string;
+  user_name: string;
+  template_name: string;
+}
+
+/** Result of a rename: the instance, plus whether the Incus container followed. */
+export interface RenameResult extends Instance {
+  container_renamed: boolean;
+  container_rename_error?: string;
+  restarted: boolean;
+  /** Hostname reported from inside the instance, when one was asked for. */
+  system_hostname?: string;
+}
+
+export interface RenameOptions {
+  /** Rename the Incus container too — stops and restarts the instance. */
+  rename_container?: boolean;
+  /** Rename the hostname inside Ubuntu — needs the instance running. */
+  rename_system_hostname?: boolean;
 }
 
 export interface InstanceStats {
@@ -194,6 +251,12 @@ export interface TailscaleStatusResult {
   connected: boolean;
   dns_name: string;
   machine_name: string;
+  /** What `tailscale up` said when the machine is still logged out. */
+  login_output?: string;
+  /** tailscale CLI present in the instance. */
+  installed: boolean;
+  /** tailscaled running. */
+  daemon_active: boolean;
 }
 
 export interface ProfileCheck {

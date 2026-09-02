@@ -26,7 +26,7 @@ Un template → un click → un environnement identique pour toute l'équipe.
 Choisissez un template (Ubuntu, Debian, image custom…), cliquez sur *Créer* — Plati provisionne le container, monte le volume de travail, injecte vos clés SSH et démarre l'instance. Prêt en quelques secondes.
 
 ### Espaces de travail persistants
-Le répertoire `/workspace` survit aux rebuilds. Vos fichiers, votre code, votre historique git — tout reste intact même quand l'image est reconstruite depuis zéro.
+Votre répertoire personnel (`/home/ubuntu`) survit aux rebuilds. Vos fichiers, votre code, votre historique git — tout reste intact même quand l'image est reconstruite depuis zéro.
 
 ### Accès SSH natif
 Plati injecte automatiquement votre clé SSH dans chaque instance. Connectez-vous directement sans mot de passe, depuis votre terminal ou votre IDE (VS Code Remote, JetBrains Gateway…).

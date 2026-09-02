@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings } from './types';
 
 // Setup
 export const setup = {
@@ -64,7 +64,17 @@ export const instances = {
   delete: (id: number) => api.del(`/api/v1/instances/${id}`),
   stats: (id: number) => api.get<InstanceStats>(`/api/v1/instances/${id}/stats`),
   volumes: (id: number) => api.get<InstanceStorageInfo>(`/api/v1/instances/${id}/volumes`),
+  // Auto-stop policy (Status tab)
+  sleepSettings: (id: number) => api.get<SleepSettings>(`/api/v1/instances/${id}/sleep`),
+  updateSleepSettings: (id: number, patch: { disabled?: boolean; timeout_minutes?: number }) =>
+    api.put<SleepSettings>(`/api/v1/instances/${id}/sleep`, patch),
+  resetSleepTimer: (id: number) =>
+    api.post<SleepSettings>(`/api/v1/instances/${id}/sleep/reset`, {}),
   sshxUrl: (id: number) => api.get<SshxURLResult>(`/api/v1/instances/${id}/sshx-url`),
+  // opts selects how far the rename propagates: the Incus container (stops and
+  // restarts the instance) and/or the hostname inside Ubuntu.
+  rename: (id: number, name: string, opts: RenameOptions = {}) =>
+    api.put<RenameResult>(`/api/v1/instances/${id}`, { name, ...opts }),
   duplicate: (id: number) => api.post<Instance>(`/api/v1/instances/${id}/duplicate`),
   tailscaleServe: (id: number, port: number) =>
     api.post<TailscaleServeResult>(`/api/v1/instances/${id}/tailscale-serve`, { port }),
@@ -74,6 +84,14 @@ export const instances = {
     api.del(`/api/v1/instances/${id}/tailscale-serve`),
   tailscaleStatus: (id: number) =>
     api.get<TailscaleStatusResult>(`/api/v1/instances/${id}/tailscale-status`),
+  // Re-applies the tailscale mixin to a running instance and returns the resulting status.
+  tailscaleInstall: (id: number) =>
+    api.post<TailscaleStatusResult>(`/api/v1/instances/${id}/tailscale-install`, {}),
+  // Authorized keys (SSH access to the running instance)
+  listAuthorizedKeys: (id: number) =>
+    api.get<InstanceAuthorizedKey[]>(`/api/v1/instances/${id}/authorized-keys`),
+  addAuthorizedKey: (id: number, key_id: number) =>
+    api.post<{ message: string }>(`/api/v1/instances/${id}/authorized-keys`, { key_id }),
   listSecrets: (id: number) => api.get<InstanceSecret[]>(`/api/v1/instances/${id}/secrets`),
   createSecret: (id: number, name: string, value: string) =>
     api.post<{ id: number }>(`/api/v1/instances/${id}/secrets`, { name, value }),
@@ -125,14 +143,21 @@ export const admin = {
     list: () => api.get<User[]>('/api/v1/admin/users'),
     create: (email: string, name: string, password: string, role: 'admin' | 'user') =>
       api.post<User>('/api/v1/admin/users', { email, name, password, role }),
-    update: (id: number, name: string, role: string) =>
-      api.put(`/api/v1/admin/users/${id}`, { name, role }),
+    // password is optional — omit or leave empty to keep the current one.
+    update: (id: number, name: string, role: string, password?: string) =>
+      api.put(`/api/v1/admin/users/${id}`, { name, role, password: password || '' }),
     delete: (id: number) => api.del(`/api/v1/admin/users/${id}`),
     listKeys: (id: number) => api.get<UserSSHKey[]>(`/api/v1/admin/users/${id}/keys`),
     generateKey: (id: number, name: string) =>
       api.post<AdminGeneratedUserKeyResult>(`/api/v1/admin/users/${id}/keys/generate`, { name }),
     deleteKey: (userId: number, keyId: number) =>
       api.del(`/api/v1/admin/users/${userId}/keys/${keyId}`),
+    // User-provided public keys — injected into the user's instances (authorized_keys).
+    listPublicKeys: (id: number) => api.get<SSHKey[]>(`/api/v1/admin/users/${id}/public-keys`),
+    addPublicKey: (id: number, name: string, public_key: string) =>
+      api.post<SSHKey>(`/api/v1/admin/users/${id}/public-keys`, { name, public_key }),
+    deletePublicKey: (userId: number, keyId: number) =>
+      api.del(`/api/v1/admin/users/${userId}/public-keys/${keyId}`),
     apiKeys: {
       list: (userId: number) => api.get<ApiKey[]>(`/api/v1/admin/users/${userId}/api-keys`),
       create: (userId: number, name: string) =>
@@ -142,9 +167,12 @@ export const admin = {
     }
   },
   instances: {
-    list: () => api.get<Instance[]>('/api/v1/admin/instances'),
+    list: () => api.get<AdminInstance[]>('/api/v1/admin/instances'),
     create: (name: string, template_id: number, user_id: number) =>
       api.post<Instance>('/api/v1/admin/instances', { name, template_id, user_id }),
+    // Copies any user's instance; user_id is the account the copy is assigned to.
+    duplicate: (id: number, user_id: number) =>
+      api.post<Instance>(`/api/v1/admin/instances/${id}/duplicate`, { user_id }),
     incusInfo: (id: number) => api.get<IncusDetail>(`/api/v1/admin/instances/${id}/incus-info`),
     updateIncusConfig: (id: number, config: IncusConfigUpdate) =>
       api.put(`/api/v1/admin/instances/${id}/incus-config`, config),

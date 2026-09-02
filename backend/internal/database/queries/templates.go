@@ -11,7 +11,7 @@ func ListTemplates(db *sqlx.DB, activeOnly bool) ([]models.Template, error) {
 	// which can contain base64-encoded binaries from mixins (100MB+). Use GetTemplate for full data.
 	query := `SELECT id, name, slug, description, image, profiles, resources,
 		terminal_user, persistence_mode, persistence_dirs, includes, repos,
-		health_checks, tailscale_serve, is_active,
+		health_checks, tailscale_serve, incus_config, is_active,
 		created_at, updated_at FROM templates`
 	if activeOnly {
 		query += " WHERE is_active = 1"
@@ -41,11 +41,11 @@ func GetTemplateBySlug(db *sqlx.DB, slug string) (*models.Template, error) {
 
 func CreateTemplate(db *sqlx.DB, t *models.Template) (int64, error) {
 	res, err := db.Exec(
-		`INSERT INTO templates (name, slug, description, image, profiles, resources, terminal_user, post_create_commands, persistence_mode, persistence_dirs, first_init_commands, rebuild_commands, includes, repos, health_checks, tailscale_serve, is_active)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO templates (name, slug, description, image, profiles, resources, terminal_user, post_create_commands, persistence_mode, persistence_dirs, first_init_commands, rebuild_commands, includes, repos, health_checks, tailscale_serve, incus_config, is_active)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.TerminalUser, t.PostCreateCommands,
 		t.PersistenceMode, t.PersistenceDirs, t.FirstInitCommands, t.RebuildCommands, t.Includes, t.Repos,
-		t.HealthChecks, t.TailscaleServe, t.IsActive,
+		t.HealthChecks, t.TailscaleServe, t.IncusConfig, t.IsActive,
 	)
 	if err != nil {
 		return 0, err
@@ -55,11 +55,11 @@ func CreateTemplate(db *sqlx.DB, t *models.Template) (int64, error) {
 
 func UpdateTemplate(db *sqlx.DB, t *models.Template) error {
 	_, err := db.Exec(
-		`UPDATE templates SET name = ?, slug = ?, description = ?, image = ?, profiles = ?, resources = ?, terminal_user = ?, post_create_commands = ?, persistence_mode = ?, persistence_dirs = ?, first_init_commands = ?, rebuild_commands = ?, includes = ?, repos = ?, health_checks = ?, tailscale_serve = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+		`UPDATE templates SET name = ?, slug = ?, description = ?, image = ?, profiles = ?, resources = ?, terminal_user = ?, post_create_commands = ?, persistence_mode = ?, persistence_dirs = ?, first_init_commands = ?, rebuild_commands = ?, includes = ?, repos = ?, health_checks = ?, tailscale_serve = ?, incus_config = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ?`,
 		t.Name, t.Slug, t.Description, t.Image, t.Profiles, t.Resources, t.TerminalUser, t.PostCreateCommands,
 		t.PersistenceMode, t.PersistenceDirs, t.FirstInitCommands, t.RebuildCommands, t.Includes, t.Repos,
-		t.HealthChecks, t.TailscaleServe, t.IsActive, t.ID,
+		t.HealthChecks, t.TailscaleServe, t.IncusConfig, t.IsActive, t.ID,
 	)
 	return err
 }

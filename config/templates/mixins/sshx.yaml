@@ -1,4 +1,6 @@
 name: SSHX mixin
+# Registers a systemd unit: root.
+run_as: root
 files:
   - src: sshx.service
     dest: /etc/systemd/system/sshx.service

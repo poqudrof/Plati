@@ -59,3 +59,13 @@ id_ed25519.pub
 .env.plati
 # Clés SSH générées par le backend
 config/ssh_keys/
+
+# Clé SSH et cert Incus UI déposés à la racine
+private-key
+incus-ui.crt
+
+# Sauvegardes de config (contiennent les secrets)
+config/plati.yaml.bak-*
+
+# Binaires téléchargés par les mixins (81 Mo)
+config/templates/mixins/dist/dist/

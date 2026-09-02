@@ -1,19 +1,78 @@
-# Dev — sources bind-montées, aucun build, pas de nginx.
-# Accès : http://127.0.0.1:5300  (Vite proxie /api, /auth, /health → backend)
+# Dev — sources bind-montées, aucun build, HMR ; publié sur le tailnet comme la
+# prod, pour développer l'UI tout en gardant l'accès à distance.
 #
-# Même base que docker-compose.prod.yml : mêmes images, mêmes volumes, même
-# amorçage de config. La prod n'ajoute que la publication sur le tailnet.
+#   Tailnet ──► conteneur « tailscale »  (hostname ${TS_HOSTNAME})
+#               tailscaled --tun=userspace-networking + Serve 80/443
+#                 │  netstack ne route l'entrant QUE vers 127.0.0.1
+#                 │
+#                 ├─ « frontend »  vite dev  0.0.0.0:${APP_PORT}  ┐ network_mode:
+#                 └─ « backend »   Go        0.0.0.0:8080         ┘ service:tailscale
+#                                          │
+#                                          ▼ 172.31.240.1:8444
+#                                    Incus, sur l'HÔTE
 #
-# Pas de network_mode: host — les conteneurs vivent sur un bridge Docker, donc
-# le :8080 du backend est interne et n'entre pas en conflit avec ce qui tourne
-# déjà sur l'hôte. Incus, lui, est SUR l'hôte : on l'atteint via
-# host.docker.internal, mappé sur la gateway du réseau Docker.
+# MÊME BASE que docker-compose.prod.yml : mêmes images, mêmes sources bind-montées,
+# même volume plati-data (donc MÊME base SQLite), même config/plati.yaml, même
+# nœud Tailscale (même volume tailscale-state → même URL, aucune clé à regénérer
+# en basculant). La SEULE différence est le frontend : `vite dev` avec HMR ici,
+# `vite build` + server.js là-bas.
 #
-# Usage : docker compose -f docker-compose.dev.yml up -d
+# Accès :
+#   https://${TS_HOSTNAME}.<tailnet>.ts.net   depuis le tailnet, avec HMR
+#   http://127.0.0.1:5300                     depuis l'hôte (debug ; voir HMR ci-dessous)
+#   http://127.0.0.1:8090                     backend en direct (scripts de test)
+#
+# NE JAMAIS lancer cette pile en même temps que la prod : mêmes container_name,
+# même nœud Tailscale, et surtout même fichier SQLite en écrivain unique
+# (MaxOpenConns=1). Basculer explicitement :
+#   docker compose --env-file .env.tailscale -f docker-compose.prod.yml down
+#   docker compose --env-file .env.tailscale -f docker-compose.dev.yml up -d
+#
+# HMR : le client Vite calcule son URL WebSocket en `hostname:${hmrPort || port
+# de la page}`. Sur https://…ts.net la page n'a pas de port explicite, donc sans
+# réglage l'URL serait « wss://…ts.net: » — invalide. D'où VITE_HMR_CLIENT_PORT=443
+# ci-dessous, que Tailscale Serve proxifie vers le serveur de dev. Conséquence
+# assumée : le HMR vise le 443, donc il ne fonctionne QUE via l'URL tailnet.
+# Le 127.0.0.1:5300 sert toujours l'app, mais sans rechargement à chaud — passer
+# VITE_HMR_CLIENT_PORT=5300 pour inverser le compromis.
+#
+# ATTENTION au port : ${APP_PORT} est répercuté à DEUX endroits — la commande
+# Vite ci-dessous et EN DUR dans deploy/tailscale/serve.json (Tailscale Serve
+# n'interpole pas les variables d'environnement).
+#
+# Usage :
+#   docker compose --env-file .env.tailscale -f docker-compose.dev.yml up -d
 
 services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: plati-tailscale
+    hostname: ${TS_HOSTNAME:-plati}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?TS_AUTHKEY manquant — voir .env.tailscale.example}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      # Même volume qu'en prod : porte l'identité du nœud, donc la même URL et
+      # aucune nouvelle clé d'auth en basculant dev ↔ prod. Ne pas supprimer
+      # (pas de `down -v`).
+      - tailscale-state:/var/lib/tailscale
+      - ./deploy/tailscale/serve.json:/config/serve.json:ro
+    # Ce conteneur détient le netns partagé : les ports publiés se déclarent ICI,
+    # pas sur backend/frontend. Bind sur la boucle locale, rien sur le LAN.
+    ports:
+      - "127.0.0.1:5300:${APP_PORT:-17231}"   # frontend (vite dev)
+      - "127.0.0.1:8090:8080"                 # backend en direct (tests.sh)
+    networks:
+      - plati
+    restart: unless-stopped
+
   # Amorçage de config/plati.yaml — ne fait rien si le fichier existe déjà.
   # Les secrets restent vides : c'est l'assistant /setup qui les pose.
+  # Réseau « plati » ordinaire : il lui faut juste de quoi télécharger les
+  # modules Go, pas d'exposition.
   config-init:
     image: golang:1.23
     container_name: plati-config-init
@@ -27,6 +86,8 @@ services:
       - .env.plati                          # PLATI_* — lues par le générateur
     environment:
       CGO_ENABLED: "0"
+    networks:
+      - plati
     restart: "no"
 
   backend:
@@ -39,17 +100,14 @@ services:
       - ./config:/workspace/config          # plati.yaml + templates + certs
       - plati-data:/workspace/data          # SQLite (db + -wal + -shm)
       - go-pkg:/go/pkg                      # module/build cache
-    # Incus tourne sur l'hôte : host-gateway pointe sur l'adresse de l'hôte vue
-    # depuis le réseau Docker. Même valeur en dev et en prod, donc même config.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    # Publié sur la boucle locale uniquement : confort de debug et scripts de
-    # test. Le frontend, lui, passe par le réseau Docker.
-    ports:
-      - "127.0.0.1:8090:8080"
+    # Pas d'extra_hosts : Docker l'interdit avec network_mode: service:* . Incus
+    # est donc joint par l'IP de gateway du sous-réseau figé (cf. plati.yaml).
+    network_mode: "service:tailscale"
     environment:
       CGO_ENABLED: "1"                      # requis par mattn/go-sqlite3
     depends_on:
+      tailscale:
+        condition: service_started
       config-init:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -58,20 +116,39 @@ services:
     image: node:22-alpine
     container_name: plati-frontend
     working_dir: /workspace/frontend
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5300"
+    # --host 0.0.0.0 : nécessaire pour que le port publié par le conteneur
+    # tailscale (docker-proxy) atteigne Vite ; 127.0.0.1 suffirait pour Serve.
+    command: sh -c "npm install --include=dev --no-audit --no-fund && npm run dev -- --host 0.0.0.0 --port ${APP_PORT:-17231}"
     volumes:
       - ./frontend:/workspace/frontend      # source
       - frontend-nm:/workspace/frontend/node_modules  # isolated node_modules
-    ports:
-      - "127.0.0.1:5300:5300"
+    network_mode: "service:tailscale"
     environment:
-      BACKEND_HOST: backend                 # résolu par le DNS Docker
+      # Même netns que le backend → le proxy Vite passe par la boucle locale.
+      BACKEND_HOST: 127.0.0.1
+      # Port que le client HMR doit viser : celui de Tailscale Serve, pas celui
+      # du serveur de dev (cf. l'explication en tête de fichier).
+      VITE_HMR_CLIENT_PORT: "443"
     depends_on:
+      tailscale:
+        condition: service_started
       backend:
         condition: service_started
     restart: unless-stopped
+
+networks:
+  # Sous-réseau figé — même valeur qu'en prod — pour que l'adresse de la gateway
+  # (= l'hôte, donc Incus) soit déterministe et puisse être écrite en dur dans
+  # config/plati.yaml, qui est partagé par les deux piles.
+  plati:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+          gateway: 172.31.240.1
 
 volumes:
   go-pkg:
   frontend-nm:
   plati-data:
+  tailscale-state:

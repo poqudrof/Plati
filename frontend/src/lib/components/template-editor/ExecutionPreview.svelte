@@ -109,9 +109,11 @@
 
     // 11. Mixin commands
     for (const m of includedMixins) {
+      // run_as: user mixins are wrapped server-side in a login shell for terminal_user.
+      const as = m.run_as === 'user' && terminalUser ? ` as ${terminalUser}` : '';
       for (const cmd of m.commands) {
         const label = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
-        steps.push({ category: 'command', label: `[${m.name}] ${label}` });
+        steps.push({ category: 'command', label: `[${m.name}${as}] ${label}` });
       }
     }
 

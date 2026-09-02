@@ -24,7 +24,7 @@ Workflow testé :
   11. npm ci dans le container
   12. Démarrage du serveur de dev (nohup)
   13. curl HTTP → app répond
-  14. Vérification SSH : node --version, ls /workspace
+  14. Vérification SSH : node --version, ls ~
   15. Suppression instance via API → cleanup DB
 
 Prérequis : docker, python3-bcrypt, paramiko, requests, pyyaml
@@ -225,8 +225,8 @@ class DockerTestContainer:
             apt-get install -y nodejs 2>/dev/null
             # Create ubuntu user
             id ubuntu &>/dev/null || useradd -m -s /bin/bash ubuntu
-            mkdir -p /home/ubuntu/.ssh /workspace
-            chown ubuntu:ubuntu /home/ubuntu/.ssh /workspace
+            mkdir -p /home/ubuntu/.ssh
+            chown ubuntu:ubuntu /home/ubuntu/.ssh
             chmod 700 /home/ubuntu/.ssh
             echo '{ssh_pub_key}' >> /home/ubuntu/.ssh/authorized_keys
             chmod 600 /home/ubuntu/.ssh/authorized_keys
@@ -445,20 +445,20 @@ class PlatiSystemIntegration(unittest.TestCase):
         print(f"    Node.js : {version}")
 
     def test_09_clone_code(self):
-        """Clone / copie du repo dans /workspace du container."""
+        """Clone / copie du repo dans le home du container."""
         self.assertIsNotNone(self.ssh)
         repo = Path(REPO_TO_CLONE)
         repo_name = repo.name
 
         if repo.exists():
-            print(f"    rsync {REPO_TO_CLONE} → /workspace/{repo_name} …")
+            print(f"    rsync {REPO_TO_CLONE} → /home/ubuntu/{repo_name} …")
             result = subprocess.run(
                 [
                     "rsync", "-a", "--delete",
                     "--exclude=node_modules", "--exclude=.git", "--exclude=.next",
                     "-e", f"ssh -i {SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
                     f"{REPO_TO_CLONE}/",
-                    f"{CONTAINER_USER}@{self.container_ip}:/workspace/{repo_name}/",
+                    f"{CONTAINER_USER}@{self.container_ip}:/home/ubuntu/{repo_name}/",
                 ],
                 capture_output=True, text=True, timeout=120,
             )
@@ -466,23 +466,23 @@ class PlatiSystemIntegration(unittest.TestCase):
                 self.fail(f"rsync échoué :\n{result.stderr}")
         else:
             _, stdout, _ = self.ssh.exec_command(
-                f"git clone {REPO_TO_CLONE} /workspace/{repo_name} 2>&1", timeout=120)
+                f"git clone {REPO_TO_CLONE} /home/ubuntu/{repo_name} 2>&1", timeout=120)
             exit_code = stdout.channel.recv_exit_status()
             self.assertEqual(exit_code, 0, f"clone échoué : {stdout.read().decode()}")
 
-        _, stdout, _ = self.ssh.exec_command(f"test -d /workspace/{repo_name} && echo ok")
+        _, stdout, _ = self.ssh.exec_command(f"test -d /home/ubuntu/{repo_name} && echo ok")
         self.assertEqual(stdout.read().decode().strip(), "ok")
         PlatiSystemIntegration._repo_name = repo_name
-        print(f"    Code présent dans /workspace/{repo_name}")
+        print(f"    Code présent dans /home/ubuntu/{repo_name}")
 
     def test_10_npm_install(self):
         """npm ci dans le container."""
         self.assertIsNotNone(self.ssh)
         repo_name = getattr(type(self), "_repo_name", Path(REPO_TO_CLONE).name)
-        print(f"    npm ci dans /workspace/{repo_name} …")
+        print(f"    npm ci dans /home/ubuntu/{repo_name} …")
 
         _, stdout, _ = self.ssh.exec_command(
-            f"cd /workspace/{repo_name} && npm ci 2>&1", timeout=300)
+            f"cd /home/ubuntu/{repo_name} && npm ci 2>&1", timeout=300)
         exit_code = stdout.channel.recv_exit_status()
         output = stdout.read().decode()
         if exit_code != 0:
@@ -496,7 +496,7 @@ class PlatiSystemIntegration(unittest.TestCase):
 
         # Lancer le serveur via setsid pour le détacher du canal SSH
         start_cmd = (
-            f"cd /workspace/{repo_name} && "
+            f"cd /home/ubuntu/{repo_name} && "
             f"setsid {APP_START_CMD} > /tmp/dev-server.log 2>&1 &"
         )
         self.ssh.exec_command(start_cmd)
@@ -545,13 +545,13 @@ class PlatiSystemIntegration(unittest.TestCase):
         self.fail(f"App ne répond pas sur {app_url} : {last_err}")
 
     def test_13_workspace_ls(self):
-        """Les fichiers du repo sont bien dans /workspace."""
+        """Les fichiers du repo sont bien dans le home."""
         self.assertIsNotNone(self.ssh)
         repo_name = getattr(type(self), "_repo_name", Path(REPO_TO_CLONE).name)
-        _, stdout, _ = self.ssh.exec_command(f"ls /workspace/{repo_name}/")
+        _, stdout, _ = self.ssh.exec_command(f"ls /home/ubuntu/{repo_name}/")
         files = stdout.read().decode().strip().split("\n")
         self.assertGreater(len(files), 0)
-        print(f"    /workspace/{repo_name} : {', '.join(files[:6])} …")
+        print(f"    /home/ubuntu/{repo_name} : {', '.join(files[:6])} …")
 
     def test_14_delete_instance_via_api(self):
         """L'instance peut être supprimée via l'API (cleanup DB)."""

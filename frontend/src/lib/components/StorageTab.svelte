@@ -2,33 +2,85 @@
   import { browser } from '$app/environment';
   import { Filemanager, Willow } from '@svar-ui/svelte-filemanager';
   import { instances } from '$lib/api';
-  import type { VolumeDetail, VolumeSnapshot } from '$lib/api/types';
+  import type { FileEntry, VolumeDetail, VolumeSnapshot } from '$lib/api/types';
   import { addNotification } from '$lib/stores/notifications';
 
   interface Props {
     instanceId: number;
     instanceStatus: string;
     storageVolumes: VolumeDetail[];
+    persistenceMode: string;
+    /** Login user's home, e.g. /home/ubuntu — where the browser opens when it is browsable. */
+    homeDir: string;
   }
 
-  let { instanceId, instanceStatus, storageVolumes }: Props = $props();
+  let { instanceId, instanceStatus, storageVolumes, persistenceMode, homeDir }: Props = $props();
 
   // ── File Manager ──
   let fmData = $state<any[]>([]);
   let fmReady = $state(false);
 
-  // Build initial data: volumes as root folders with lazy loading
+  // Mirrors isPathWithinVolumes in backend/internal/services/storage_service.go: the API
+  // rejects anything outside a mounted volume, so never ask for a path it would refuse.
+  function isWithinVolumes(path: string, vols: VolumeDetail[]): boolean {
+    return vols.some(v => path === v.mount_path || path.startsWith(v.mount_path + '/'));
+  }
+
+  // Open on the user's home — that is where their repos and dotfiles are. A template whose
+  // volume is mounted elsewhere leaves the home unmounted, so fall back to the first volume.
+  let defaultPath = $derived(
+    isWithinVolumes(homeDir, storageVolumes) ? homeDir : (storageVolumes[0]?.mount_path ?? '')
+  );
+  let currentPath = $state('');
+
+  // SVAR derives a node's parent by stripping the last path segment. A volume mounted at
+  // /home/ubuntu therefore hangs off a "/home" that does not exist: it never becomes a child
+  // of the "My files" root (which is why the browser came up empty), and set-path throws
+  // while walking the parent chain to build breadcrumbs. Materialise the missing ancestors.
+  function buildRoots(vols: VolumeDetail[]) {
+    const nodes = new Map<string, any>();
+    for (const v of vols) {
+      const segments = v.mount_path.split('/').filter(Boolean);
+      for (let i = 1; i < segments.length; i++) {
+        const id = '/' + segments.slice(0, i).join('/');
+        // Not lazy: an ancestor is scaffolding, and browsing it would be refused anyway.
+        if (!nodes.has(id)) nodes.set(id, { id, type: 'folder' as const, lazy: false, date: new Date(v.created_at) });
+      }
+      nodes.set(v.mount_path, {
+        id: v.mount_path,
+        type: 'folder' as const,
+        lazy: true,
+        date: new Date(v.created_at),
+        size: v.size_gb * 1024 * 1024 * 1024,
+      });
+    }
+    return [...nodes.values()];
+  }
+
+  // Build initial data: volumes (and their ancestors) as folders with lazy loading
   $effect(() => {
     if (!browser || storageVolumes.length === 0) return;
-    fmData = storageVolumes.map(v => ({
-      id: v.mount_path,
-      type: 'folder' as const,
-      lazy: true,
-      date: new Date(v.created_at),
-      size: v.size_gb * 1024 * 1024 * 1024,
-    }));
+    fmData = buildRoots(storageVolumes);
     fmReady = true;
   });
+
+  function toNodes(entries: FileEntry[]) {
+    return entries.map(e => ({
+      id: e.id,
+      type: e.type as 'file' | 'folder',
+      size: e.size,
+      date: new Date(e.date * 1000),
+      lazy: e.type === 'folder',
+    }));
+  }
+
+  // Land the user in their home rather than on the volume root they would have to expand.
+  // set-path fires request-data itself for a lazy node, so nothing needs prefetching here.
+  function openDefaultPath(api: any) {
+    if (!defaultPath || instanceStatus !== 'running') return;
+    api.exec('set-path', { id: defaultPath });
+    currentPath = defaultPath;
+  }
 
   function initFileManager(api: any) {
     // Load directory contents on demand
@@ -39,18 +91,14 @@
       }
       try {
         const entries = await instances.browseDirectory(instanceId, ev.id);
-        const parsed = entries.map(e => ({
-          id: e.id,
-          type: e.type as 'file' | 'folder',
-          size: e.size,
-          date: new Date(e.date * 1000),
-          lazy: e.type === 'folder',
-        }));
-        api.exec('provide-data', { id: ev.id, data: parsed });
+        api.exec('provide-data', { id: ev.id, data: toNodes(entries) });
       } catch (e: any) {
         addNotification('error', `Failed to load: ${e.message}`);
       }
     });
+
+    // Keep the banner in step with where the user actually is.
+    api.on('set-path', (ev: { id: string }) => { currentPath = ev.id; });
 
     // Download file
     api.on('download-file', (ev: { id: string }) => {
@@ -64,6 +112,8 @@
       const url = instances.downloadFileUrl(instanceId, ev.id);
       window.open(url, '_self');
     });
+
+    openDefaultPath(api);
   }
 
   // ── Snapshots ──
@@ -165,7 +215,16 @@
 <div class="p-6 space-y-8">
 
   <!-- File Browser -->
-  {#if instanceStatus === 'running' && fmReady}
+  {#if storageVolumes.length === 0}
+    <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
+      No persistent volumes attached (ephemeral mode). Everything in this instance is
+      instance-local and is erased when it is rebuilt or deleted.
+    </div>
+  {:else if instanceStatus !== 'running'}
+    <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
+      Instance must be running to browse files.
+    </div>
+  {:else if fmReady}
     <div>
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-base font-semibold text-gray-700">File Browser</h3>
@@ -176,6 +235,25 @@
           >Download {v.mount_path} as .tar</button>
         {/each}
       </div>
+
+      <!-- Says what is on screen and what happens to it, rather than naming actions the
+           user cannot take from here. -->
+      <div class="flex items-center gap-2 mb-3 text-sm">
+        {#if persistenceMode === 'ephemeral'}
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 shrink-0">Ephemeral</span>
+          <span class="text-gray-500">
+            Browsing <code class="font-mono text-gray-700">{currentPath || defaultPath}</code> —
+            instance-local storage, erased when the instance is rebuilt or deleted.
+          </span>
+        {:else}
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">Persistent</span>
+          <span class="text-gray-500">
+            Browsing <code class="font-mono text-gray-700">{currentPath || defaultPath}</code> —
+            kept when the instance is rebuilt, erased only if you delete the instance.
+          </span>
+        {/if}
+      </div>
+
       <div class="border rounded-lg overflow-hidden" style="height: 480px;">
         <Willow>
           <Filemanager
@@ -186,14 +264,6 @@
           />
         </Willow>
       </div>
-    </div>
-  {:else if instanceStatus !== 'running'}
-    <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
-      Instance must be running to browse files.
-    </div>
-  {:else if storageVolumes.length === 0}
-    <div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
-      No persistent volumes attached (ephemeral mode).
     </div>
   {/if}
 

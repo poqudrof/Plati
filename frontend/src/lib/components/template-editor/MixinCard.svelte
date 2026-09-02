@@ -20,6 +20,9 @@
     />
     <div class="flex-1 min-w-0">
       <span class="text-sm font-medium {included ? 'text-purple-900' : 'text-gray-600'}">{mixin.name}</span>
+      {#if mixin.run_as === 'user'}
+        <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 ml-2">as user</span>
+      {/if}
       <span class="text-xs text-gray-400 ml-2">
         {mixin.commands.length} cmd{mixin.commands.length !== 1 ? 's' : ''}
         {#if mixin.files.length > 0}
@@ -47,6 +50,14 @@
               <span>{file.dest}</span>
               <span class="text-gray-400">({file.mode})</span>
             </div>
+          {/each}
+        </div>
+      {/if}
+      {#if mixin.incus_config && Object.keys(mixin.incus_config).length > 0}
+        <div>
+          <p class="text-xs font-medium text-gray-500 mb-1">Incus config required:</p>
+          {#each Object.entries(mixin.incus_config) as [key, value]}
+            <div class="text-xs font-mono text-gray-600 py-0.5">{key} = {value}</div>
           {/each}
         </div>
       {/if}

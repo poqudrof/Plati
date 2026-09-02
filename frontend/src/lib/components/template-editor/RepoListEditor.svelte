@@ -21,7 +21,7 @@
   let cloning = $state(false);
 
   function addRepoFromList(repo: GitRepo) {
-    repos = [...repos, { name: repo.name, dest: '/workspace/' + repo.name }];
+    repos = [...repos, { name: repo.name, dest: '/home/ubuntu/' + repo.name }];
   }
 
   function removeRepo(index: number) {
@@ -40,7 +40,7 @@
     try {
       const repo = await admin.repos.add(url);
       availableRepos = [...availableRepos, repo];
-      repos = [...repos, { name: repo.name, dest: '/workspace/' + repo.name }];
+      repos = [...repos, { name: repo.name, dest: '/home/ubuntu/' + repo.name }];
       addNotification('success', `Repo "${repo.name}" added and cloning started`);
       newUrl = '';
       addingUrl = false;
@@ -74,7 +74,7 @@
         type="text"
         value={repo.dest}
         oninput={(e) => { repos[i].dest = (e.target as HTMLInputElement).value; repos = repos; }}
-        placeholder="/workspace/repo"
+        placeholder="/home/ubuntu/repo"
         class="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs font-mono bg-gray-50 focus:bg-white focus:border-primary outline-none"
       />
       <button

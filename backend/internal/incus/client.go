@@ -232,6 +232,19 @@ func (c *Client) AttachHostPath(instanceName, deviceName, hostPath, instancePath
 	return op.Wait()
 }
 
+// RenameInstance renames the Incus instance. Incus only allows this while the
+// instance is stopped; a running one comes back as an error from the operation.
+func (c *Client) RenameInstance(name, newName string) error {
+	op, err := c.server.RenameInstance(name, incusapi.InstancePost{Name: newName})
+	if err != nil {
+		return fmt.Errorf("rename instance %s: %w", name, err)
+	}
+	if err := op.Wait(); err != nil {
+		return fmt.Errorf("rename instance %s: %w", name, err)
+	}
+	return nil
+}
+
 func (c *Client) UpdateInstanceConfig(name string, config map[string]string) error {
 	inst, etag, err := c.server.GetInstance(name)
 	if err != nil {

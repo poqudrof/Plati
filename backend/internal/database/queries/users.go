@@ -68,6 +68,16 @@ func UpdateUser(db *sqlx.DB, id int64, name, role string) error {
 	return err
 }
 
+// SetUserPassword replaces the user's bcrypt hash. Passing an empty hash would
+// lock the account out of password login, so callers must hash first.
+func SetUserPassword(db *sqlx.DB, id int64, hash string) error {
+	_, err := db.Exec(
+		"UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		hash, id,
+	)
+	return err
+}
+
 func DeleteUser(db *sqlx.DB, id int64) error {
 	_, err := db.Exec("DELETE FROM users WHERE id = ?", id)
 	return err

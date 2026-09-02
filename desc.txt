@@ -14,9 +14,9 @@ Le système doit être :
 ----------
 🧠 Concept clé
 > Une instance = environnement remplaçable
-> Un workspace (volume) = données persistantes
+> Le home de l'utilisateur (volume) = données persistantes
 
-Les utilisateurs travaillent dans un dossier persistant (`/workspace`) monté dans des environnements recréables à partir de templates.
+Les utilisateurs travaillent dans un répertoire personnel persistant (`/home/ubuntu`) monté dans des environnements recréables à partir de templates.
 
 ----------
 🏗️ Architecture globale
@@ -98,8 +98,9 @@ Un template contient :
       cpu: 2
       memory: 4GB
       disk: 20GB
-    workspace:
-      mount: /workspace
+    persistence:
+      directories:
+        - path: /home/ubuntu
     cloud_init:
       vendor_data: ...
 
@@ -133,11 +134,11 @@ Contiennent :
 
 ----------
 
-4. Workspace persistant
+4. Répertoire personnel persistant
 Utilisation de volumes Incus custom :
 
 - attachés à l’instance
-- montés dans `/workspace`
+- montés sur le home de l'utilisateur (`/home/ubuntu`)
 - non supprimés avec l’instance
 
 Permet :
@@ -202,7 +203,7 @@ Exemples :
 Utilisation :
 
 - injectés au bootstrap (cloud-init)
-- disponibles dans `/workspace/.env` ou équivalent
+- disponibles dans `/etc/profile.d/plati-env.sh`
 
 ⚠️ Scope volontairement simple (pas Vault-like)
 

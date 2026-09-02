@@ -38,6 +38,9 @@ type IncusClient interface {
 	StartInstance(name string) error
 	StopInstance(name string) error
 	DeleteInstance(name string) error
+	// RenameInstance changes an instance's Incus name. Incus refuses this while
+	// the instance is running, so the caller must stop it first.
+	RenameInstance(name, newName string) error
 	GetInstanceState(name string) (*incusapi.InstanceState, error)
 	GetInstance(name string) (*incusapi.Instance, error)
 

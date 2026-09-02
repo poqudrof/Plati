@@ -50,7 +50,7 @@ includes:                       # Mixin names to include (see Mixins section)
 persistence:
   mode: normal                  # "normal" (persistent volumes) or "ephemeral" (no volumes, wiped on rebuild)
   directories:
-    - path: /workspace          # Mount path inside instance
+    - path: /home/ubuntu        # Mount path inside instance (the login user's home)
       size: 20GB                # Volume size
       pool: default             # Optional, Incus storage pool name
 
@@ -65,7 +65,7 @@ rebuild_commands:               # Run on rebuild (when sentinel exists)
 # === Git repos (cloned from server-side cache) ===
 repos:
   - name: my-repo               # Must match a git_repos entry in Plati admin
-    dest: /workspace/my-repo    # Destination path inside instance
+    dest: /home/ubuntu/my-repo  # Destination path inside instance
 
 # === Health checks (for service templates) ===
 health_checks:
@@ -83,7 +83,7 @@ tailscale_serve:
 
 ### Defaults & behavior
 
-- **No `persistence` block** → automatically creates a single `/workspace` volume sized from `resources.disk`, mode `normal`
+- **No `persistence` block** → automatically creates a single volume on the login user's home (`/home/{terminal_user}`, or `/root` when no `terminal_user` is set), sized from `resources.disk`, mode `normal`
 - **Sentinel file**: In `normal` mode, `{first_dir}/.plati-initialized` marks that first-init already ran. `first_init_commands` only run when sentinel is absent; `rebuild_commands` run when it exists.
 - **Ephemeral mode**: No volumes created. All storage is instance-local. `first_init_commands` always run on every create/rebuild.
 - **`post_create_commands`**: Deprecated, merged into `first_init_commands` for backward compat. Use `first_init_commands` instead.
@@ -211,7 +211,7 @@ If using Plati's git repo cache (repos pre-cloned on the server):
 ```yaml
 repos:
   - name: repo-name          # Must exist in Plati admin > Repos
-    dest: /workspace/repo-name
+    dest: /home/ubuntu/repo-name
 ```
 
 ### Step 12: Write and validate
@@ -232,7 +232,7 @@ slug: ubuntu
 image: images:ubuntu/24.04/cloud
 profiles: [default, docker]
 resources: { cpu: 2, memory: 4GB, disk: 20GB }
-persistence: { mode: normal, directories: [{ path: /workspace, size: 20GB }] }
+persistence: { mode: normal, directories: [{ path: /home/ubuntu, size: 20GB }] }
 terminal_user: ubuntu
 includes: [tailscale, sshx, docker, openvscode-server]
 first_init_commands:
@@ -251,7 +251,7 @@ slug: ubuntu-gpu
 image: images:ubuntu/24.04/cloud
 profiles: [default, docker, nvidia]
 resources: { cpu: 4, memory: 8GB, disk: 40GB }
-persistence: { mode: normal, directories: [{ path: /workspace, size: 40GB }] }
+persistence: { mode: normal, directories: [{ path: /home/ubuntu, size: 40GB }] }
 terminal_user: ubuntu
 includes: [tailscale, sshx, docker, nvidia]
 first_init_commands:
@@ -266,13 +266,13 @@ slug: site-ia-gen
 image: images:ubuntu/24.04/cloud
 profiles: [default]
 resources: { cpu: 2, memory: 4GB, disk: 20GB }
-persistence: { mode: normal, directories: [{ path: /workspace, size: 20GB }] }
+persistence: { mode: normal, directories: [{ path: /home/ubuntu, size: 20GB }] }
 terminal_user: ubuntu
 repos:
   - name: AI-state-art-public
-    dest: /workspace/AI-state-art-public
+    dest: /home/ubuntu/AI-state-art-public
 rebuild_commands:
-  - cd /workspace/AI-state-art-public && git pull --ff-only || true
+  - cd /home/ubuntu/AI-state-art-public && git pull --ff-only || true
 ```
 
 ### Ephemeral service with health checks (simple-webserver.yaml)
@@ -334,7 +334,7 @@ incus exec <name> -- docker ps
 incus exec <name> -- docker images
 
 # File system
-incus exec <name> -- ls -la /workspace
+incus exec <name> -- ls -la /home/ubuntu
 incus exec <name> -- df -h
 
 # Cloud-init status and logs

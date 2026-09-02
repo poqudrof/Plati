@@ -24,6 +24,7 @@ type Deps struct {
 	AdminSettingsHandler *handlers.AdminSettingsHandler
 	RepoHandler          *handlers.RepoHandler
 	StorageHandler       *handlers.StorageHandler
+	SleepHandler         *handlers.SleepHandler
 	APIKeyHandler        *handlers.APIKeyHandler
 	APIKeyAuth           auth.APIKeyAuthenticator
 	JWTSecret            string
@@ -99,20 +100,31 @@ func New(deps Deps) *chi.Mux {
 			r.Get("/instances", deps.InstanceHandler.List)
 			r.Post("/instances", deps.InstanceHandler.Create)
 			r.Get("/instances/{id}", deps.InstanceHandler.Get)
+			r.Put("/instances/{id}", deps.InstanceHandler.Rename)
 			r.Post("/instances/{id}/start", deps.InstanceHandler.Start)
 			r.Post("/instances/{id}/stop", deps.InstanceHandler.Stop)
 			r.Post("/instances/{id}/rebuild", deps.InstanceHandler.Rebuild)
 			r.Delete("/instances/{id}", deps.InstanceHandler.Delete)
 			r.Get("/instances/{id}/volumes", deps.InstanceHandler.Volumes)
 			r.Get("/instances/{id}/stats", deps.InstanceHandler.Stats)
+
+			// Auto-stop (sleep) policy — the Status tab
+			r.Get("/instances/{id}/sleep", deps.SleepHandler.Get)
+			r.Put("/instances/{id}/sleep", deps.SleepHandler.Update)
+			r.Post("/instances/{id}/sleep/reset", deps.SleepHandler.Reset)
 			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
 			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
 			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)
 			r.Get("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeStatus)
 			r.Delete("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeOff)
 			r.Get("/instances/{id}/tailscale-status", deps.InstanceHandler.TailscaleStatus)
+			r.Post("/instances/{id}/tailscale-install", deps.InstanceHandler.TailscaleInstall)
 			r.Get("/instances/{id}/terminal", deps.TerminalHandler.Connect)
 			r.Get("/instances/{id}/creation-stream", deps.TerminalHandler.CreationStream)
+
+			// Instance authorized keys (SSH access to a running instance)
+			r.Get("/instances/{id}/authorized-keys", deps.InstanceHandler.ListAuthorizedKeys)
+			r.Post("/instances/{id}/authorized-keys", deps.InstanceHandler.AddAuthorizedKey)
 
 			// Instance secrets
 			r.Get("/instances/{id}/secrets", deps.InstanceHandler.ListSecrets)
@@ -165,6 +177,11 @@ func New(deps Deps) *chi.Mux {
 				r.Post("/users/{id}/keys/generate", deps.AdminHandler.GenerateUserKey)
 				r.Delete("/users/{id}/keys/{key_id}", deps.AdminHandler.DeleteUserKey)
 
+				// User public keys (admin-managed authorized_keys entries)
+				r.Get("/users/{id}/public-keys", deps.AdminHandler.ListUserPublicKeys)
+				r.Post("/users/{id}/public-keys", deps.AdminHandler.AddUserPublicKey)
+				r.Delete("/users/{id}/public-keys/{key_id}", deps.AdminHandler.DeleteUserPublicKey)
+
 				// User API key management (admin creates/regenerates on behalf of user)
 				r.Get("/users/{id}/api-keys", deps.APIKeyHandler.AdminList)
 				r.Post("/users/{id}/api-keys", deps.APIKeyHandler.AdminCreate)
@@ -180,6 +197,7 @@ func New(deps Deps) *chi.Mux {
 				// Instances (admin)
 				r.Get("/instances", deps.AdminHandler.ListAllInstances)
 				r.Post("/instances", deps.AdminHandler.CreateInstanceForUser)
+				r.Post("/instances/{id}/duplicate", deps.AdminHandler.DuplicateInstance)
 				r.Get("/instances/{id}/incus-info", deps.InstanceHandler.IncusDetail)
 				r.Put("/instances/{id}/incus-config", deps.InstanceHandler.UpdateIncusConfig)
 				r.Get("/instances/{id}/debug-logs", deps.TerminalHandler.DebugLogs)

@@ -31,6 +31,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -119,6 +120,20 @@ func loadFullTemplate(t *testing.T, slug string) fullTemplateYAML {
 		t.Fatalf("parse template %s: %v", path, err)
 	}
 	return tmpl
+}
+
+// repoTarget returns the name and destination path of the template's first repo —
+// the path Plati copies it to, and the one the template's own rebuild_commands name.
+func repoTarget(tmpl fullTemplateYAML) (name, dest string) {
+	name = "AI-state-art-public"
+	if len(tmpl.Repos) > 0 && tmpl.Repos[0].Name != "" {
+		name = tmpl.Repos[0].Name
+	}
+	dest = "/home/ubuntu/" + name
+	if len(tmpl.Repos) > 0 && tmpl.Repos[0].Dest != "" {
+		dest = tmpl.Repos[0].Dest
+	}
+	return name, dest
 }
 
 // loadMixin reads and parses a mixin YAML from config/templates/mixins/<name>.yaml.
@@ -520,14 +535,14 @@ func TestImage_DockerInDocker(t *testing.T) {
 //
 //   - Container provisions from ubuntu/24.04/cloud
 //   - git is available (pre-installed in Ubuntu cloud images)
-//   - Workspace directory can be created and used
+//   - The repo destination directory can be created and used
 //   - Git repository operations work (init, commit, clone, pull)
 //   - The template's rebuild_command pattern (git pull --ff-only || true) succeeds
 //   - SSH key injection is functional (authorized_keys written)
 //
 // The test simulates the Plati repo-copy flow locally: a bare repo is initialized
-// inside the container and cloned to /workspace/AI-state-art-public so that
-// subsequent git pull calls succeed.
+// inside the container and cloned to the template's own repo destination, so that
+// the template's rebuild_commands (which name that path) succeed unmodified.
 func TestImage_QcmPocFormation(t *testing.T) {
 	client := newIncusClient(t)
 	tmpl := loadTemplate(t, "qcm-poc-formation")
@@ -541,11 +556,14 @@ func TestImage_QcmPocFormation(t *testing.T) {
 	gitVer := runContains(t, client, name, "git version", "git", "--version")
 	t.Logf("git: %s", gitVer)
 
-	// ── 2. Workspace directory setup ────────────────────────────────────────
-	// In production Plati attaches a named volume and the sentinel check
-	// decides first-init vs rebuild. Here we create the directory manually.
-	run(t, client, name, "mkdir", "-p", "/workspace")
-	t.Logf("/workspace: created")
+	// ── 2. Repo destination setup ───────────────────────────────────────────
+	// In production Plati attaches a named volume at the template's persistence
+	// path and the sentinel check decides first-init vs rebuild. Here we take the
+	// destination straight from the template and create its parent manually.
+	repoName, repoDest := repoTarget(fullTmpl)
+	repoBare := "/tmp/" + repoName + ".git"
+	run(t, client, name, "mkdir", "-p", path.Dir(repoDest))
+	t.Logf("%s: created", path.Dir(repoDest))
 
 	// ── 3. SSH key injection (simulates Plati phase-2 setup) ────────────────
 	// Write a throwaway test public key so authorized_keys is non-empty.
@@ -562,7 +580,7 @@ func TestImage_QcmPocFormation(t *testing.T) {
 	setupScript := strings.Join([]string{
 		"git config --global user.email 'test@plati.dev'",
 		"git config --global user.name 'Plati E2E Test'",
-		"git init --bare /tmp/ai-state-art-public.git",
+		"git init --bare " + repoBare,
 		// Bootstrap: create a working clone, add a file, push to the bare repo.
 		"git init /tmp/bootstrap-src",
 		"git -C /tmp/bootstrap-src config user.email 'test@plati.dev'",
@@ -570,22 +588,22 @@ func TestImage_QcmPocFormation(t *testing.T) {
 		"echo 'QCM PoC Formation' > /tmp/bootstrap-src/README.md",
 		"git -C /tmp/bootstrap-src add README.md",
 		"git -C /tmp/bootstrap-src commit -m 'Initial commit'",
-		"git -C /tmp/bootstrap-src remote add origin /tmp/ai-state-art-public.git",
+		"git -C /tmp/bootstrap-src remote add origin " + repoBare,
 		"git -C /tmp/bootstrap-src push -u origin HEAD:main",
 	}, " && ")
 	run(t, client, name, "/bin/sh", "-c", setupScript)
-	t.Logf("bare repo initialized at /tmp/ai-state-art-public.git")
+	t.Logf("bare repo initialized at %s", repoBare)
 
-	// ── 5. Simulate Plati repo copy: cp → workspace dest ────────────────────
-	// In production: cp -rp /plati-repos/AI-state-art-public /workspace/AI-state-art-public
+	// ── 5. Simulate Plati repo copy: cp → repo dest ─────────────────────────
+	// In production: cp -rp /plati-repos/<name> <dest>
 	// Here we clone the bare repo (same net effect — git-tracked directory at the dest path).
 	run(t, client, name, "/bin/sh", "-c",
-		"git clone /tmp/ai-state-art-public.git /workspace/AI-state-art-public")
-	run(t, client, name, "test", "-d", "/workspace/AI-state-art-public")
-	t.Logf("/workspace/AI-state-art-public: present after clone")
+		fmt.Sprintf("git clone %s %s", repoBare, repoDest))
+	run(t, client, name, "test", "-d", repoDest)
+	t.Logf("%s: present after clone", repoDest)
 
 	// Verify the README landed.
-	readmeOut := run(t, client, name, "cat", "/workspace/AI-state-art-public/README.md")
+	readmeOut := run(t, client, name, "cat", repoDest+"/README.md")
 	if !strings.Contains(readmeOut, "QCM") {
 		t.Errorf("README.md content unexpected: %s", readmeOut)
 	}
@@ -593,9 +611,9 @@ func TestImage_QcmPocFormation(t *testing.T) {
 
 	// ── 6. Simulate git remote set-url (Plati sets origin after copy) ────────
 	run(t, client, name, "/bin/sh", "-c",
-		"cd /workspace/AI-state-art-public && git remote set-url origin /tmp/ai-state-art-public.git")
+		fmt.Sprintf("git -C %s remote set-url origin %s", repoDest, repoBare))
 	originURL := run(t, client, name, "/bin/sh", "-c",
-		"git -C /workspace/AI-state-art-public remote get-url origin")
+		fmt.Sprintf("git -C %s remote get-url origin", repoDest))
 	t.Logf("git remote origin: %s", originURL)
 
 	// ── 7. Add a new commit to origin, then test git pull (rebuild_command) ──
@@ -608,7 +626,7 @@ func TestImage_QcmPocFormation(t *testing.T) {
 	run(t, client, name, "/bin/sh", "-c", updateScript)
 	t.Logf("origin updated with a new commit")
 
-	// Template rebuild_commands: cd /workspace/AI-state-art-public && git pull --ff-only || true
+	// Template rebuild_commands run verbatim: they name repoDest, which now exists.
 	for _, rebuildCmd := range fullTmpl.RebuildCommands {
 		t.Logf("rebuild_command: %s", rebuildCmd)
 		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", rebuildCmd})
@@ -621,7 +639,7 @@ func TestImage_QcmPocFormation(t *testing.T) {
 	}
 
 	// Verify the update was pulled.
-	readmeAfterPull := run(t, client, name, "cat", "/workspace/AI-state-art-public/README.md")
+	readmeAfterPull := run(t, client, name, "cat", repoDest+"/README.md")
 	if !strings.Contains(readmeAfterPull, "Update v2") {
 		t.Errorf("git pull did not fetch the new commit; README: %s", readmeAfterPull)
 	}
@@ -644,7 +662,7 @@ func TestImage_QcmPocFormation(t *testing.T) {
 //
 //   - Container provisions from ubuntu/24.04/cloud
 //   - git is available
-//   - Workspace directory works for git operations
+//   - The repo destination directory works for git operations
 //   - rebuild_commands (git pull) run successfully after initial clone
 //
 // Uses the same bare-repo pattern as TestImage_QcmPocFormation since both
@@ -662,16 +680,12 @@ func TestImage_SiteIAGen(t *testing.T) {
 	gitVer := runContains(t, client, name, "git version", "git", "--version")
 	t.Logf("git: %s", gitVer)
 
-	// ── 2. Workspace setup ──────────────────────────────────────────────────
-	run(t, client, name, "mkdir", "-p", "/workspace")
+	// ── 2. Repo destination setup ───────────────────────────────────────────
+	repoName, repoWorkPath := repoTarget(fullTmpl)
+	run(t, client, name, "mkdir", "-p", path.Dir(repoWorkPath))
 
 	// ── 3. Bootstrap bare repo + clone (simulates Plati repo copy) ──────────
-	repoName := "AI-state-art-public"
-	if len(fullTmpl.Repos) > 0 {
-		repoName = fullTmpl.Repos[0].Name
-	}
 	repoBarePath := "/tmp/" + repoName + ".git"
-	repoWorkPath := "/workspace/" + repoName
 
 	setupScript := strings.Join([]string{
 		"git config --global user.email 'test@plati.dev'",
@@ -705,16 +719,14 @@ func TestImage_SiteIAGen(t *testing.T) {
 	}, " && ")
 	run(t, client, name, "/bin/sh", "-c", updateScript)
 
-	// Adapt rebuild_commands to use the local bare repo path.
 	rebuildCmds := fullTmpl.RebuildCommands
 	if len(rebuildCmds) == 0 {
 		t.Log("no rebuild_commands in template — skipping git pull step")
 	}
 	for _, cmd := range rebuildCmds {
-		// Replace the expected workspace path if needed (the template hardcodes it).
-		adaptedCmd := strings.ReplaceAll(cmd, "/workspace/AI-state-art-public", repoWorkPath)
-		t.Logf("rebuild_command: %s", adaptedCmd)
-		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", adaptedCmd})
+		// No rewriting needed: the clone above went to the very path the template names.
+		t.Logf("rebuild_command: %s", cmd)
+		out, err := client.RunCommand(name, []string{"/bin/sh", "-c", cmd})
 		if err != nil {
 			t.Errorf("rebuild_command failed: %v\noutput: %s", err, strings.TrimSpace(out))
 		} else {

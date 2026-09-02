@@ -19,7 +19,7 @@ type GitRepo struct {
 
 type TemplateRepoRef struct {
 	Name string `json:"name"` // matches git_repos.name
-	Dest string `json:"dest"` // path inside instance e.g. "/workspace/AI-state-art-public"
+	Dest string `json:"dest"` // path inside instance e.g. "/home/ubuntu/AI-state-art-public"
 }
 
 type User struct {
@@ -109,18 +109,19 @@ type Template struct {
 	Slug               string    `db:"slug" json:"slug"`
 	Description        string    `db:"description" json:"description"`
 	Image              string    `db:"image" json:"image"`
-	Profiles           string    `db:"profiles" json:"profiles"`   // JSON array
-	Resources          string    `db:"resources" json:"resources"` // JSON object
+	Profiles           string    `db:"profiles" json:"profiles"`                         // JSON array
+	Resources          string    `db:"resources" json:"resources"`                       // JSON object
 	TerminalUser       string    `db:"terminal_user" json:"terminal_user"`               // non-root login user; empty = root only
 	PostCreateCommands string    `db:"post_create_commands" json:"post_create_commands"` // JSON array (deprecated)
 	PersistenceMode    string    `db:"persistence_mode"    json:"persistence_mode"`      // "normal" | "ephemeral"
 	PersistenceDirs    string    `db:"persistence_dirs"    json:"persistence_dirs"`      // JSON array of {path,size,pool}
 	FirstInitCommands  string    `db:"first_init_commands" json:"first_init_commands"`   // JSON array
 	RebuildCommands    string    `db:"rebuild_commands"    json:"rebuild_commands"`      // JSON array
-	Includes           string    `db:"includes"            json:"includes"`               // JSON array of mixin names
+	Includes           string    `db:"includes"            json:"includes"`              // JSON array of mixin names
 	Repos              string    `db:"repos"               json:"repos"`                 // JSON array of {name,dest} repo refs
 	HealthChecks       string    `db:"health_checks"       json:"health_checks"`         // JSON array of {port,path,expected_status,timeout,description}
 	TailscaleServe     string    `db:"tailscale_serve"     json:"tailscale_serve"`       // JSON object {port,funnel} or empty
+	IncusConfig        string    `db:"incus_config"        json:"incus_config"`          // JSON object of Incus config keys (e.g. security.nesting)
 	IsActive           bool      `db:"is_active" json:"is_active"`
 	CreatedAt          time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
@@ -193,6 +194,20 @@ type Instance struct {
 	IPAddress    sql.NullString `db:"ip_address" json:"ip_address"`
 	CreationLog  string         `db:"creation_log" json:"creation_log"`
 	LastActiveAt sql.NullTime   `db:"last_active_at" json:"last_active_at"`
-	CreatedAt    time.Time      `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
+
+	// Auto-stop policy. SleepDisabled takes the instance out of the sleep
+	// worker's sweep; SleepTimeoutMinutes of 0 means "use the platform default".
+	SleepDisabled       bool      `db:"sleep_disabled" json:"sleep_disabled"`
+	SleepTimeoutMinutes int       `db:"sleep_timeout_minutes" json:"sleep_timeout_minutes"`
+	CreatedAt           time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt           time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// AdminInstance is an Instance enriched with the owner and template names.
+// Admin views list machines across every user, where a bare user_id is useless.
+type AdminInstance struct {
+	Instance
+	UserEmail    string `db:"user_email" json:"user_email"`
+	UserName     string `db:"user_name" json:"user_name"`
+	TemplateName string `db:"template_name" json:"template_name"`
 }

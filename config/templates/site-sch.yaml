@@ -1,6 +1,6 @@
-name: Site IA Gen
-slug: site-ia-gen
-description: AI State of the Art public site (catie-aq)
+name: Site Équipe SCH
+slug: site-sch
+description: SCH peac2h public site (catie-aq)
 image: images:ubuntu/24.04/cloud
 profiles:
     - default
@@ -25,12 +25,12 @@ first_init_commands:
     # each template adds its own user to the docker group.
     - usermod -aG docker ubuntu
 rebuild_commands:
-    - cd /home/ubuntu/AI-state-art-public && git pull --ff-only || true
+    - cd /home/ubuntu/sch-site && git pull --ff-only || true
 persistence:
     mode: normal
     directories:
         - path: /home/ubuntu
           size: 20GB
 repos:
-    - name: AI-state-art-public
-      dest: /home/ubuntu/AI-state-art-public
+    - name: sch-site
+      dest: /home/ubuntu/sch-site

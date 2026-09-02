@@ -13,7 +13,7 @@ resources:
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /home/ubuntu
       size: 40GB
 terminal_user: ubuntu
 includes:

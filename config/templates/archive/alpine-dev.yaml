@@ -12,13 +12,12 @@ resources:
 persistence:
   mode: normal
   directories:
-    - path: /workspace
+    - path: /root
       size: 10GB
       pool: default
 
 first_init_commands:
   - apk add --no-cache git curl openssh-client
-  - mkdir -p /workspace
 
 rebuild_commands:
-  - cd /workspace && git pull --ff-only 2>/dev/null || true
+  - cd /root && git pull --ff-only 2>/dev/null || true

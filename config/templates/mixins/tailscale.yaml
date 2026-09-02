@@ -1,4 +1,6 @@
 name: Tailscale mixin
+# Installs tailscaled and brings the tunnel up: root.
+run_as: root
 files:
   - src: dist/tailscale-install.sh
     dest: /root/tailscale-install.sh
