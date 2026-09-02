@@ -3143,3 +3143,220 @@ func TestInstanceSleepSettings(t *testing.T) {
 		t.Fatalf("instance payload should carry the policy, got %+v", inst)
 	}
 }
+
+// --- Admin access to other users' instances -------------------------------------
+//
+// Every /api/v1/instances/{id}/… route resolves through queries.GetInstanceForActor,
+// which lets an admin through and scopes everyone else to their own rows. These tests
+// pin both halves of that rule, plus the subtler half: reaching another user's instance
+// is not the same as acting as them.
+
+// seedBob creates a regular user with a password and returns their id.
+func seedBob(t *testing.T, h *harness, password string) int64 {
+	t.Helper()
+	h.db.Exec("ALTER TABLE users ADD COLUMN password_hash TEXT")
+	hash, _ := auth.HashPassword(password)
+	res, err := h.db.Exec(
+		`INSERT INTO users (email, name, role, password_hash) VALUES ('bob@test.com', 'Bob', 'user', ?)`, hash)
+	if err != nil {
+		t.Fatalf("insert bob: %v", err)
+	}
+	id, _ := res.LastInsertId()
+	return id
+}
+
+func loginAs(t *testing.T, h *harness, body map[string]string) {
+	t.Helper()
+	h.do("POST", "/auth/logout", nil).Body.Close()
+	resp := h.do("POST", "/auth/login", body)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login %v: %d — %s", body["email"], resp.StatusCode, b)
+	}
+	resp.Body.Close()
+}
+
+func TestAdminOperatesOtherUsersInstance(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	bobID := seedBob(t, h, "userpass123")
+
+	resp := h.do("POST", "/api/v1/admin/instances", map[string]any{
+		"name": "bob-ws", "template_id": templateID, "user_id": bobID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create for bob: %d — %s", resp.StatusCode, b)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	// The admin is still logged in and does not own this instance.
+	resp = h.do("GET", fmt.Sprintf("/api/v1/instances/%d", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin GET other's instance: got %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = h.do("POST", fmt.Sprintf("/api/v1/instances/%d/stop", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("admin stop other's instance: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+	if got := h.mock.instances[inst.IncusName].Status; got != "Stopped" {
+		t.Errorf("mock status after admin stop: %q, want Stopped", got)
+	}
+
+	resp = h.do("POST", fmt.Sprintf("/api/v1/instances/%d/start", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("admin start other's instance: got %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Rename is the one that catches a userID passed where the owner's id belongs:
+	// UpdateInstanceName filters on user_id, so the wrong id updates zero rows and the
+	// API still answers 200. Assert the row itself, not the status code.
+	resp = h.do("PUT", fmt.Sprintf("/api/v1/instances/%d", inst.ID), map[string]any{"name": "bob-renamed"})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("admin rename other's instance: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+	var name string
+	if err := h.db.Get(&name, "SELECT name FROM instances WHERE id = ?", inst.ID); err != nil {
+		t.Fatalf("read name: %v", err)
+	}
+	if name != "bob-renamed" {
+		t.Errorf("name in DB = %q, want bob-renamed — the UPDATE matched no row", name)
+	}
+
+	// Auto-stop has the same WHERE user_id shape.
+	resp = h.do("PUT", fmt.Sprintf("/api/v1/instances/%d/sleep", inst.ID), map[string]any{"timeout_minutes": 90})
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("admin set sleep on other's instance: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+	var timeout int
+	h.db.Get(&timeout, "SELECT sleep_timeout_minutes FROM instances WHERE id = ?", inst.ID)
+	if timeout != 90 {
+		t.Errorf("sleep_timeout_minutes = %d, want 90 — the UPDATE matched no row", timeout)
+	}
+}
+
+func TestNonAdminCannotReachOtherUsersInstance(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	seedBob(t, h, "userpass123")
+
+	// An instance owned by the admin.
+	resp := h.do("POST", "/api/v1/instances", map[string]any{"name": "admin-ws", "template_id": templateID})
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create admin instance: %d — %s", resp.StatusCode, b)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	loginAs(t, h, map[string]string{"email": "bob@test.com", "password": "userpass123"})
+
+	// Exhaustive: this table is the safety net for the mechanical rewrite of every
+	// GetInstanceByUser call site. A route that stops scoping shows up here.
+	base := fmt.Sprintf("/api/v1/instances/%d", inst.ID)
+	cases := []struct {
+		method, path string
+		body         any
+	}{
+		{"GET", base, nil},
+		{"PUT", base, map[string]any{"name": "stolen"}},
+		{"POST", base + "/start", nil},
+		{"POST", base + "/stop", nil},
+		{"POST", base + "/rebuild", nil},
+		{"DELETE", base, nil},
+		{"GET", base + "/volumes", nil},
+		{"GET", base + "/stats", nil},
+		{"GET", base + "/sleep", nil},
+		{"PUT", base + "/sleep", map[string]any{"disabled": true}},
+		{"POST", base + "/sleep/reset", nil},
+		{"GET", base + "/secrets", nil},
+		{"POST", base + "/secrets", map[string]any{"name": "X", "value": "y"}},
+		{"GET", base + "/authorized-keys", nil},
+		{"POST", base + "/authorized-keys", map[string]any{"key_id": 1}},
+		{"GET", base + "/sshx-url", nil},
+		{"POST", base + "/duplicate", nil},
+		{"GET", base + "/storage/browse?path=/home/ubuntu", nil},
+		{"GET", base + "/storage/download?path=/home/ubuntu/x", nil},
+		{"GET", base + "/tailscale-status", nil},
+	}
+	for _, c := range cases {
+		resp := h.do(c.method, c.path, c.body)
+		got := resp.StatusCode
+		resp.Body.Close()
+		if got == http.StatusOK || got == http.StatusCreated {
+			t.Errorf("%s %s: bob got %d on the admin's instance — scoping lost", c.method, c.path, got)
+		}
+	}
+
+	// And the row is untouched.
+	var name string
+	h.db.Get(&name, "SELECT name FROM instances WHERE id = ?", inst.ID)
+	if name != "admin-ws" {
+		t.Errorf("instance name = %q after bob's attempts, want admin-ws", name)
+	}
+}
+
+func TestRebuildByAdminUsesOwnersSecrets(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+	h.do("POST", "/auth/login", map[string]string{"password": testPassword}).Body.Close()
+
+	templateID := seedTemplate(t, h)
+	bobID := seedBob(t, h, "userpass123")
+
+	resp := h.do("POST", "/api/v1/admin/instances", map[string]any{
+		"name": "bob-secrets", "template_id": templateID, "user_id": bobID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create for bob: %d — %s", resp.StatusCode, b)
+	}
+	var inst models.InstanceJSON
+	mustJSON(t, resp, &inst)
+	waitForInstanceReady(t, h, inst.ID)
+
+	// A secret for each user, so a mix-up is visible either way.
+	loginAs(t, h, map[string]string{"email": "bob@test.com", "password": "userpass123"})
+	resp = h.do("POST", "/api/v1/secrets", map[string]any{"name": "WHOSE", "value": "bobs-value"})
+	resp.Body.Close()
+
+	loginAs(t, h, map[string]string{"password": testPassword})
+	resp = h.do("POST", "/api/v1/secrets", map[string]any{"name": "WHOSE", "value": "admins-value"})
+	resp.Body.Close()
+
+	// The admin rebuilds Bob's workspace. Rebuild recreates the container from scratch
+	// and re-injects keys and secrets: if it reads them from the caller instead of the
+	// owner, the admin's decrypted secrets land in Bob's container and the admin's SSH
+	// keys replace Bob's, locking him out of his own machine.
+	resp = h.do("POST", fmt.Sprintf("/api/v1/instances/%d/rebuild", inst.ID), nil)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("admin rebuild bob's instance: %d — %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+
+	cfg := h.mock.instances[inst.IncusName].Config
+	if got := cfg["environment.WHOSE"]; got == "admins-value" {
+		t.Fatalf("rebuild injected the ADMIN's secret into Bob's container — credential leak")
+	} else if got != "bobs-value" {
+		t.Errorf("environment.WHOSE = %q, want bobs-value", got)
+	}
+}

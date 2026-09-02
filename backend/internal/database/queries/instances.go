@@ -1,6 +1,7 @@
 package queries
 
 import (
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/models"
 	"github.com/jmoiron/sqlx"
 )
@@ -49,6 +50,20 @@ func GetInstanceByUser(db *sqlx.DB, id, userID int64) (*models.Instance, error) 
 		return nil, err
 	}
 	return &inst, nil
+}
+
+// GetInstanceForActor is the single ownership gate for instance access: an admin reaches
+// any instance, everyone else only their own. Callers outside this file must go through
+// it rather than GetInstanceByUser, so that the admin rule lives in exactly one place.
+//
+// Note that resolving an instance is not the same as acting as its owner: a caller that
+// then needs the owner's SSH keys, secrets or preferences must read them from
+// inst.UserID, never from actor.UserID.
+func GetInstanceForActor(db *sqlx.DB, id int64, actor auth.Actor) (*models.Instance, error) {
+	if actor.Admin {
+		return GetInstance(db, id)
+	}
+	return GetInstanceByUser(db, id, actor.UserID)
 }
 
 func CreateInstance(db *sqlx.DB, inst *models.Instance) (int64, error) {

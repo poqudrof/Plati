@@ -8,6 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
@@ -23,8 +24,8 @@ func NewStorageService(db *sqlx.DB, pool *incus.Pool) *StorageService {
 }
 
 // getClientForInstance validates ownership and returns the Incus client + instance record.
-func (s *StorageService) getClientForInstance(instanceID, userID int64) (*models.Instance, incus.IncusClient, error) {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *StorageService) getClientForInstance(instanceID int64, actor auth.Actor) (*models.Instance, incus.IncusClient, error) {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return nil, nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -70,8 +71,8 @@ func isPathWithinVolumes(path string, vols []models.InstanceVolume) bool {
 }
 
 // ListDirectory lists directory contents at the given path inside the instance.
-func (s *StorageService) ListDirectory(instanceID, userID int64, path string) ([]incus.FileEntry, error) {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) ListDirectory(instanceID int64, actor auth.Actor, path string) ([]incus.FileEntry, error) {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +91,8 @@ func (s *StorageService) ListDirectory(instanceID, userID int64, path string) ([
 
 // DownloadFile streams a single file from the instance.
 // Returns the reader, the basename for Content-Disposition, and any error.
-func (s *StorageService) DownloadFile(instanceID, userID int64, path string) (io.ReadCloser, string, error) {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) DownloadFile(instanceID int64, actor auth.Actor, path string) (io.ReadCloser, string, error) {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return nil, "", err
 	}
@@ -119,8 +120,8 @@ func (s *StorageService) DownloadFile(instanceID, userID int64, path string) (io
 }
 
 // DownloadDirectory streams a directory as a tar archive.
-func (s *StorageService) DownloadDirectory(instanceID, userID int64, path string) (io.ReadCloser, string, error) {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) DownloadDirectory(instanceID int64, actor auth.Actor, path string) (io.ReadCloser, string, error) {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return nil, "", err
 	}
@@ -142,8 +143,8 @@ func (s *StorageService) DownloadDirectory(instanceID, userID int64, path string
 }
 
 // ListSnapshots lists snapshots for a volume belonging to the user's instance.
-func (s *StorageService) ListSnapshots(instanceID, userID int64, volumeID int64) ([]incus.VolumeSnapshotInfo, error) {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) ListSnapshots(instanceID int64, actor auth.Actor, volumeID int64) ([]incus.VolumeSnapshotInfo, error) {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +159,8 @@ func (s *StorageService) ListSnapshots(instanceID, userID int64, volumeID int64)
 }
 
 // CreateSnapshot creates a named snapshot for a volume.
-func (s *StorageService) CreateSnapshot(instanceID, userID int64, volumeID int64, name string) error {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) CreateSnapshot(instanceID int64, actor auth.Actor, volumeID int64, name string) error {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return err
 	}
@@ -174,8 +175,8 @@ func (s *StorageService) CreateSnapshot(instanceID, userID int64, volumeID int64
 }
 
 // DeleteSnapshot deletes a named volume snapshot.
-func (s *StorageService) DeleteSnapshot(instanceID, userID int64, volumeID int64, snapshotName string) error {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) DeleteSnapshot(instanceID int64, actor auth.Actor, volumeID int64, snapshotName string) error {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return err
 	}
@@ -191,8 +192,8 @@ func (s *StorageService) DeleteSnapshot(instanceID, userID int64, volumeID int64
 
 // RestoreSnapshot restores a volume from a named snapshot.
 // The instance must be stopped for data consistency.
-func (s *StorageService) RestoreSnapshot(instanceID, userID int64, volumeID int64, snapshotName string) error {
-	inst, client, err := s.getClientForInstance(instanceID, userID)
+func (s *StorageService) RestoreSnapshot(instanceID int64, actor auth.Actor, volumeID int64, snapshotName string) error {
+	inst, client, err := s.getClientForInstance(instanceID, actor)
 	if err != nil {
 		return err
 	}

@@ -304,7 +304,7 @@ func (h *AdminHandler) DebugCreateInstance(w http.ResponseWriter, r *http.Reques
 
 	// Delete previous debug instance for this template (best-effort).
 	if prev, err := queries.GetLatestDebugInstanceForTemplate(h.db, id, user.ID); err == nil {
-		_ = h.instanceSvc.Delete(prev.ID, user.ID)
+		_ = h.instanceSvc.Delete(prev.ID, auth.Actor{UserID: user.ID, Admin: true})
 	}
 
 	req := services.CreateInstanceRequest{

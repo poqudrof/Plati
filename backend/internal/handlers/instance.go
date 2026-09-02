@@ -6,7 +6,6 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/services"
 )
@@ -21,8 +20,11 @@ func NewInstanceHandler(svc *services.InstanceService, db *sqlx.DB) *InstanceHan
 }
 
 func (h *InstanceHandler) List(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	instances, err := queries.ListInstancesByUser(h.db, user.ID)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	instances, err := queries.ListInstancesByUser(h.db, actor.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list instances")
 		return
@@ -31,13 +33,16 @@ func (h *InstanceHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Get(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	inst, err := queries.GetInstanceByUser(h.db, id, user.ID)
+	inst, err := queries.GetInstanceForActor(h.db, id, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "instance not found")
 		return
@@ -46,13 +51,16 @@ func (h *InstanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Create(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	var req services.CreateInstanceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
-	req.UserID = user.ID
+	req.UserID = actor.UserID
 
 	inst, err := h.svc.CreateAsync(req)
 	if err != nil {
@@ -63,7 +71,10 @@ func (h *InstanceHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -79,7 +90,7 @@ func (h *InstanceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
-	inst, err := h.svc.Rename(id, user.ID, req.Name, req.RenameOptions)
+	inst, err := h.svc.Rename(id, actor, req.Name, req.RenameOptions)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -88,13 +99,16 @@ func (h *InstanceHandler) Rename(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Start(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.Start(id, user.ID); err != nil {
+	if err := h.svc.Start(id, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -102,13 +116,16 @@ func (h *InstanceHandler) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.Stop(id, user.ID); err != nil {
+	if err := h.svc.Stop(id, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -116,13 +133,16 @@ func (h *InstanceHandler) Stop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Rebuild(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.Rebuild(id, user.ID); err != nil {
+	if err := h.svc.Rebuild(id, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -130,13 +150,16 @@ func (h *InstanceHandler) Rebuild(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.Delete(id, user.ID); err != nil {
+	if err := h.svc.Delete(id, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -144,8 +167,11 @@ func (h *InstanceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) ListDisks(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	disks, err := queries.ListUserDisks(h.db, user.ID)
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	disks, err := queries.ListUserDisks(h.db, actor.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list disks")
 		return
@@ -154,13 +180,16 @@ func (h *InstanceHandler) ListDisks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Volumes(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	info, err := h.svc.GetStorageInfo(id, user.ID)
+	info, err := h.svc.GetStorageInfo(id, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -169,13 +198,16 @@ func (h *InstanceHandler) Volumes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Stats(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	stats, err := h.svc.GetStats(id, user.ID)
+	stats, err := h.svc.GetStats(id, actor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -184,13 +216,16 @@ func (h *InstanceHandler) Stats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) SshxURL(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	result, err := h.svc.GetSshxURL(id, user.ID)
+	result, err := h.svc.GetSshxURL(id, actor)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -199,13 +234,16 @@ func (h *InstanceHandler) SshxURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	inst, err := h.svc.Duplicate(id, user.ID)
+	inst, err := h.svc.Duplicate(id, actor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -250,7 +288,10 @@ func (h *InstanceHandler) IncusDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) TailscaleServe(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -263,7 +304,7 @@ func (h *InstanceHandler) TailscaleServe(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "valid port required")
 		return
 	}
-	result, err := h.svc.TailscaleServe(id, user.ID, body.Port)
+	result, err := h.svc.TailscaleServe(id, actor, body.Port)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -272,13 +313,16 @@ func (h *InstanceHandler) TailscaleServe(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *InstanceHandler) TailscaleServeStatus(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	result, err := h.svc.TailscaleServeStatus(id, user.ID)
+	result, err := h.svc.TailscaleServeStatus(id, actor)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -287,13 +331,16 @@ func (h *InstanceHandler) TailscaleServeStatus(w http.ResponseWriter, r *http.Re
 }
 
 func (h *InstanceHandler) TailscaleStatus(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	result, err := h.svc.GetTailscaleStatus(id, user.ID)
+	result, err := h.svc.GetTailscaleStatus(id, actor)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -304,13 +351,16 @@ func (h *InstanceHandler) TailscaleStatus(w http.ResponseWriter, r *http.Request
 // TailscaleInstall re-applies the tailscale mixin to a running instance and returns the
 // resulting status, so the caller can show whether the machine came up on the tailnet.
 func (h *InstanceHandler) TailscaleInstall(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	result, err := h.svc.InstallTailscale(id, user.ID)
+	result, err := h.svc.InstallTailscale(id, actor)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -319,13 +369,16 @@ func (h *InstanceHandler) TailscaleInstall(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *InstanceHandler) TailscaleServeOff(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.TailscaleServeOff(id, user.ID); err != nil {
+	if err := h.svc.TailscaleServeOff(id, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -335,13 +388,16 @@ func (h *InstanceHandler) TailscaleServeOff(w http.ResponseWriter, r *http.Reque
 // Authorized keys (push a registered public key into a running instance)
 
 func (h *InstanceHandler) ListAuthorizedKeys(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	keys, err := h.svc.ListAuthorizedKeys(instanceID, user.ID)
+	keys, err := h.svc.ListAuthorizedKeys(instanceID, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -350,7 +406,10 @@ func (h *InstanceHandler) ListAuthorizedKeys(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *InstanceHandler) AddAuthorizedKey(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -363,7 +422,7 @@ func (h *InstanceHandler) AddAuthorizedKey(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "key_id required")
 		return
 	}
-	if err := h.svc.AddAuthorizedKey(instanceID, user.ID, req.KeyID); err != nil {
+	if err := h.svc.AddAuthorizedKey(instanceID, actor, req.KeyID); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -371,13 +430,16 @@ func (h *InstanceHandler) AddAuthorizedKey(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *InstanceHandler) ListSecrets(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	secrets, err := h.svc.ListInstanceSecrets(instanceID, user.ID)
+	secrets, err := h.svc.ListInstanceSecrets(instanceID, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -386,7 +448,10 @@ func (h *InstanceHandler) ListSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -400,7 +465,7 @@ func (h *InstanceHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and value required")
 		return
 	}
-	id, err := h.svc.CreateInstanceSecret(instanceID, user.ID, body.Name, body.Value)
+	id, err := h.svc.CreateInstanceSecret(instanceID, actor, body.Name, body.Value)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -409,7 +474,10 @@ func (h *InstanceHandler) CreateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) UpdateSecret(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -427,7 +495,7 @@ func (h *InstanceHandler) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "value required")
 		return
 	}
-	if err := h.svc.UpdateInstanceSecret(secretID, instanceID, user.ID, body.Value); err != nil {
+	if err := h.svc.UpdateInstanceSecret(secretID, instanceID, actor, body.Value); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -435,7 +503,10 @@ func (h *InstanceHandler) UpdateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InstanceHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	instanceID, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -446,7 +517,7 @@ func (h *InstanceHandler) DeleteSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid secret id")
 		return
 	}
-	if err := h.svc.DeleteInstanceSecret(secretID, instanceID, user.ID); err != nil {
+	if err := h.svc.DeleteInstanceSecret(secretID, instanceID, actor); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

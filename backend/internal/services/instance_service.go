@@ -14,6 +14,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
@@ -646,8 +647,8 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 	return inst, nil
 }
 
-func (s *InstanceService) Start(id, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) Start(id int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -677,8 +678,8 @@ func (s *InstanceService) Start(id, userID int64) error {
 	return nil
 }
 
-func (s *InstanceService) Stop(id, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) Stop(id int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -701,8 +702,8 @@ func (s *InstanceService) Stop(id, userID int64) error {
 	return nil
 }
 
-func (s *InstanceService) Rebuild(id, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) Rebuild(id int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -722,9 +723,13 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 		return err
 	}
 
-	// Resolve user preferences
-	prefs, _ := s.prefSvc.Get(userID)
-	publicKeys, privateKeys := s.collectSSHKeysForMode(userID, prefs.SSHKeyMode)
+	// Resolve user preferences. Everything below is read from inst.UserID, not from
+	// the caller: an admin may rebuild someone else's workspace, and injecting the
+	// admin's SSH keys would lock the owner out of their own machine while injecting
+	// the admin's decrypted secrets would leak them into another user's container.
+	// ReapplySetup already works this way.
+	prefs, _ := s.prefSvc.Get(inst.UserID)
+	publicKeys, privateKeys := s.collectSSHKeysForMode(inst.UserID, prefs.SSHKeyMode)
 
 	// Stop instance
 	_ = client.StopInstance(inst.IncusName)
@@ -748,7 +753,7 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 		profiles = []string{"default"}
 	}
 
-	secretsEnv := s.buildSecretsEnv(userID, id, prefs.TailscaleMode)
+	secretsEnv := s.buildSecretsEnv(inst.UserID, id, prefs.TailscaleMode)
 	secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(inst.Name)
 	config := incus.BuildInstanceConfig(resources, templateIncusConfig(tmpl))
 	for k, v := range secretsEnv {
@@ -826,8 +831,8 @@ func (s *InstanceService) Rebuild(id, userID int64) error {
 	return nil
 }
 
-func (s *InstanceService) Delete(id, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) Delete(id int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -875,16 +880,16 @@ func (s *InstanceService) Delete(id, userID int64) error {
 
 // Instance secrets management
 
-func (s *InstanceService) ListInstanceSecrets(instanceID, userID int64) ([]models.InstanceSecret, error) {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) ListInstanceSecrets(instanceID int64, actor auth.Actor) ([]models.InstanceSecret, error) {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
 	return queries.ListInstanceSecrets(s.db, inst.ID)
 }
 
-func (s *InstanceService) CreateInstanceSecret(instanceID, userID int64, name, value string) (int64, error) {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) CreateInstanceSecret(instanceID int64, actor auth.Actor, name, value string) (int64, error) {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return 0, fmt.Errorf("instance not found: %w", err)
 	}
@@ -895,8 +900,8 @@ func (s *InstanceService) CreateInstanceSecret(instanceID, userID int64, name, v
 	return queries.CreateInstanceSecret(s.db, inst.ID, name, encrypted)
 }
 
-func (s *InstanceService) UpdateInstanceSecret(id, instanceID, userID int64, value string) error {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) UpdateInstanceSecret(id, instanceID int64, actor auth.Actor, value string) error {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -907,8 +912,8 @@ func (s *InstanceService) UpdateInstanceSecret(id, instanceID, userID int64, val
 	return queries.UpdateInstanceSecret(s.db, id, inst.ID, encrypted)
 }
 
-func (s *InstanceService) DeleteInstanceSecret(id, instanceID, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) DeleteInstanceSecret(id, instanceID int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -927,8 +932,8 @@ type InstanceStorageInfo struct {
 }
 
 // GetStorageInfo returns persistence mode and attached volumes for an instance.
-func (s *InstanceService) GetStorageInfo(id, userID int64) (*InstanceStorageInfo, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) GetStorageInfo(id int64, actor auth.Actor) (*InstanceStorageInfo, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -958,8 +963,8 @@ type InstanceStats struct {
 
 // GetStats runs lightweight commands inside a running instance to collect workspace metrics.
 // Returns an empty stats struct (no error) for stopped instances.
-func (s *InstanceService) GetStats(id, userID int64) (*InstanceStats, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) GetStats(id int64, actor auth.Actor) (*InstanceStats, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1026,8 +1031,8 @@ printf "has_git=%%s\ngit_modified=%%s\ndisk_used=%%s\n" "$HAS_GIT" "$GIT_MOD" "$
 
 // GetSshxURL retrieves the collaborative terminal URL from the sshx service journal.
 // Returns an empty URL (no error) when sshx hasn't printed its URL yet.
-func (s *InstanceService) GetSshxURL(id, userID int64) (*SshxURLResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) GetSshxURL(id int64, actor auth.Actor) (*SshxURLResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1063,8 +1068,8 @@ type TailscaleServeResult struct {
 }
 
 // TailscaleServe enables Tailscale Serve on the given port inside the instance.
-func (s *InstanceService) TailscaleServe(id, userID int64, port int) (*TailscaleServeResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) TailscaleServe(id int64, actor auth.Actor, port int) (*TailscaleServeResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1111,8 +1116,8 @@ func (s *InstanceService) TailscaleServe(id, userID int64, port int) (*Tailscale
 }
 
 // TailscaleServeStatus checks the current Tailscale Serve status inside the instance.
-func (s *InstanceService) TailscaleServeStatus(id, userID int64) (*TailscaleServeResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) TailscaleServeStatus(id int64, actor auth.Actor) (*TailscaleServeResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1164,8 +1169,8 @@ func (s *InstanceService) TailscaleServeStatus(id, userID int64) (*TailscaleServ
 }
 
 // TailscaleServeOff disables Tailscale Serve inside the instance.
-func (s *InstanceService) TailscaleServeOff(id, userID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) TailscaleServeOff(id int64, actor auth.Actor) error {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}
@@ -1212,8 +1217,8 @@ func redactTailscaleKeys(s string) string {
 }
 
 // GetTailscaleStatus returns the Tailscale machine's Magic DNS name and connection status.
-func (s *InstanceService) GetTailscaleStatus(id, userID int64) (*TailscaleStatusResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) GetTailscaleStatus(id int64, actor auth.Actor) (*TailscaleStatusResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1270,8 +1275,8 @@ func (s *InstanceService) GetTailscaleStatus(id, userID int64) (*TailscaleStatus
 // runs its commands. Used from the instance page when Tailscale is missing, its daemon is
 // down, or the machine is logged out — typically because no auth key existed at create
 // time. It returns the status observed afterwards.
-func (s *InstanceService) InstallTailscale(id, userID int64) (*TailscaleStatusResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) InstallTailscale(id int64, actor auth.Actor) (*TailscaleStatusResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1303,7 +1308,7 @@ func (s *InstanceService) InstallTailscale(id, userID int64) (*TailscaleStatusRe
 	}
 	s.runSetupSteps(client, inst.IncusName, steps, nil)
 
-	status, err := s.GetTailscaleStatus(id, userID)
+	status, err := s.GetTailscaleStatus(id, actor)
 	if err != nil || status.Connected {
 		return status, err
 	}
@@ -1321,7 +1326,7 @@ func (s *InstanceService) InstallTailscale(id, userID int64) (*TailscaleStatusRe
 	log.Printf("tailscale login %s: %s", inst.IncusName, out)
 
 	// The retry may itself have logged the machine in.
-	status, err = s.GetTailscaleStatus(id, userID)
+	status, err = s.GetTailscaleStatus(id, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -1471,8 +1476,8 @@ func (s *InstanceService) renameContainer(inst *models.Instance, client incus.In
 //
 // The DB rename is committed first; Incus and Tailscale propagation is
 // best-effort so a stopped or unreachable instance still gets renamed.
-func (s *InstanceService) Rename(id, userID int64, newName string, opts RenameOptions) (*RenameResult, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+func (s *InstanceService) Rename(id int64, actor auth.Actor, newName string, opts RenameOptions) (*RenameResult, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -1489,10 +1494,12 @@ func (s *InstanceService) Rename(id, userID int64, newName string, opts RenameOp
 		return &RenameResult{Instance: inst}, nil
 	}
 
-	// Reject a hostname already taken by another of this user's instances:
-	// Tailscale would silently suffix it (-1, -2, ...) and the two names would
+	// Reject a hostname already taken by another of the OWNER's instances: the tailnet
+	// namespace is theirs, not the caller's, so an admin renaming someone else's
+	// workspace must be checked against that user's machines.
+	// Tailscale would silently suffix a collision (-1, -2, ...) and the two names would
 	// no longer match what Plati displays.
-	siblings, err := queries.ListInstancesByUser(s.db, userID)
+	siblings, err := queries.ListInstancesByUser(s.db, inst.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
 	}
@@ -1502,7 +1509,7 @@ func (s *InstanceService) Rename(id, userID int64, newName string, opts RenameOp
 		}
 	}
 
-	if err := queries.UpdateInstanceName(s.db, id, userID, newName); err != nil {
+	if err := queries.UpdateInstanceName(s.db, id, inst.UserID, newName); err != nil {
 		return nil, fmt.Errorf("update instance name: %w", err)
 	}
 	inst.Name = newName
@@ -1572,13 +1579,16 @@ func (s *InstanceService) Rename(id, userID int64, newName string, opts RenameOp
 	return result, nil
 }
 
-// Duplicate copies an instance the caller owns, keeping it for themselves.
-func (s *InstanceService) Duplicate(id, userID int64) (*models.Instance, error) {
-	orig, err := queries.GetInstanceByUser(s.db, id, userID)
+// Duplicate copies an instance and gives the copy to its owner. For a regular user that
+// is themselves, since they can only reach their own; for an admin it means "give this
+// user another copy", which is the only sensible reading — the dashboard has an explicit
+// target picker (DuplicateForUser) for copying into a different account.
+func (s *InstanceService) Duplicate(id int64, actor auth.Actor) (*models.Instance, error) {
+	orig, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
-	return s.duplicateInto(orig, userID)
+	return s.duplicateInto(orig, orig.UserID)
 }
 
 // DuplicateForUser copies any instance, whoever owns it, and assigns the copy

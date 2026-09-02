@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/services"
 )
 
@@ -21,7 +20,10 @@ func NewStorageHandler(svc *services.StorageService) *StorageHandler {
 }
 
 func (h *StorageHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -32,7 +34,7 @@ func (h *StorageHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "path query parameter required")
 		return
 	}
-	entries, err := h.svc.ListDirectory(id, user.ID, path)
+	entries, err := h.svc.ListDirectory(id, actor, path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -45,7 +47,10 @@ func (h *StorageHandler) ListDirectory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StorageHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -56,7 +61,7 @@ func (h *StorageHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "path query parameter required")
 		return
 	}
-	reader, filename, err := h.svc.DownloadFile(id, user.ID, path)
+	reader, filename, err := h.svc.DownloadFile(id, actor, path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +74,10 @@ func (h *StorageHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StorageHandler) DownloadDirectory(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -80,7 +88,7 @@ func (h *StorageHandler) DownloadDirectory(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "path query parameter required")
 		return
 	}
-	reader, filename, err := h.svc.DownloadDirectory(id, user.ID, path)
+	reader, filename, err := h.svc.DownloadDirectory(id, actor, path)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -93,7 +101,10 @@ func (h *StorageHandler) DownloadDirectory(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *StorageHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -104,7 +115,7 @@ func (h *StorageHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid volume id")
 		return
 	}
-	snapshots, err := h.svc.ListSnapshots(id, user.ID, volID)
+	snapshots, err := h.svc.ListSnapshots(id, actor, volID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -117,7 +128,10 @@ func (h *StorageHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StorageHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -135,7 +149,7 @@ func (h *StorageHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
-	if err := h.svc.CreateSnapshot(id, user.ID, volID, body.Name); err != nil {
+	if err := h.svc.CreateSnapshot(id, actor, volID, body.Name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -143,7 +157,10 @@ func (h *StorageHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *StorageHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -159,7 +176,7 @@ func (h *StorageHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "snapshot name required")
 		return
 	}
-	if err := h.svc.DeleteSnapshot(id, user.ID, volID, name); err != nil {
+	if err := h.svc.DeleteSnapshot(id, actor, volID, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -167,7 +184,10 @@ func (h *StorageHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *StorageHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -183,7 +203,7 @@ func (h *StorageHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "snapshot name required")
 		return
 	}
-	if err := h.svc.RestoreSnapshot(id, user.ID, volID, name); err != nil {
+	if err := h.svc.RestoreSnapshot(id, actor, volID, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

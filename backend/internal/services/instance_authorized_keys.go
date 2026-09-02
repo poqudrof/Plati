@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
@@ -90,8 +91,8 @@ func (s *InstanceService) installableKeys(inst *models.Instance) ([]InstanceAuth
 // ListAuthorizedKeys returns the keys installable on this instance — the owner's, plus
 // every server administrator's — and whether each one is already in authorized_keys.
 // Presence is only checked while the instance is running.
-func (s *InstanceService) ListAuthorizedKeys(instanceID, userID int64) ([]InstanceAuthorizedKey, error) {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) ListAuthorizedKeys(instanceID int64, actor auth.Actor) ([]InstanceAuthorizedKey, error) {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
@@ -118,8 +119,8 @@ func (s *InstanceService) ListAuthorizedKeys(instanceID, userID int64) ([]Instan
 // administrator's — to the running instance's authorized_keys (root, plus the template's
 // terminal user when it exists).
 // The write is idempotent: a key already present is left untouched.
-func (s *InstanceService) AddAuthorizedKey(instanceID, userID, keyID int64) error {
-	inst, err := queries.GetInstanceByUser(s.db, instanceID, userID)
+func (s *InstanceService) AddAuthorizedKey(instanceID int64, actor auth.Actor, keyID int64) error {
+	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return fmt.Errorf("instance not found: %w", err)
 	}

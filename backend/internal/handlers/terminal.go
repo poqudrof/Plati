@@ -12,10 +12,8 @@ import (
 	incusWs "github.com/gorilla/websocket"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
-	"github.com/homaserver/plati/internal/models"
 	"github.com/homaserver/plati/internal/services"
 )
 
@@ -41,20 +39,17 @@ type resizeMsg struct {
 }
 
 func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	// Admins can connect to any instance; regular users only their own.
-	var inst *models.Instance
-	if user.Role == "admin" {
-		inst, err = queries.GetInstance(h.db, id)
-	} else {
-		inst, err = queries.GetInstanceByUser(h.db, id, user.ID)
-	}
+	inst, err := queries.GetInstanceForActor(h.db, id, actor)
 	if err != nil {
 		http.Error(w, "instance not found", http.StatusNotFound)
 		return
@@ -71,8 +66,9 @@ func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For regular users: only "root" or the template's configured terminal_user are allowed.
-	// Admins bypass this restriction.
-	if user.Role != "admin" && execUser != "root" {
+	// Admins bypass this restriction. This is a separate policy from reaching the
+	// instance at all — it governs which unix account the session runs as.
+	if !actor.Admin && execUser != "root" {
 		tmpl, err := queries.GetTemplate(h.db, inst.TemplateID)
 		if err != nil || tmpl.TerminalUser == "" || tmpl.TerminalUser != execUser {
 			http.Error(w, "user not allowed", http.StatusForbidden)
@@ -175,19 +171,17 @@ func (h *TerminalHandler) Connect(w http.ResponseWriter, r *http.Request) {
 // Replays buffered lines immediately, then tails new ones until the goroutine
 // completes. Works for both in-progress and already-finished creations.
 func (h *TerminalHandler) CreationStream(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	var inst *models.Instance
-	if user.Role == "admin" {
-		inst, err = queries.GetInstance(h.db, id)
-	} else {
-		inst, err = queries.GetInstanceByUser(h.db, id, user.ID)
-	}
+	inst, err := queries.GetInstanceForActor(h.db, id, actor)
 	if err != nil {
 		http.Error(w, "instance not found", http.StatusNotFound)
 		return

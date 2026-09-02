@@ -7,6 +7,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/database/queries"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
@@ -106,9 +107,9 @@ type SleepSettings struct {
 	SleepsAt *string `json:"sleeps_at"`
 }
 
-// GetSettings resolves the auto-stop policy of an instance owned by userID.
-func (s *SleepService) GetSettings(id, userID int64) (*SleepSettings, error) {
-	inst, err := queries.GetInstanceByUser(s.db, id, userID)
+// GetSettings resolves the auto-stop policy of an instance the actor may reach.
+func (s *SleepService) GetSettings(id int64, actor auth.Actor) (*SleepSettings, error) {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found")
 	}
@@ -117,31 +118,34 @@ func (s *SleepService) GetSettings(id, userID int64) (*SleepSettings, error) {
 
 // UpdateSettings stores a new policy and returns it resolved, so the caller
 // sees the deadline that now applies without a second round-trip.
-func (s *SleepService) UpdateSettings(id, userID int64, disabled bool, timeoutMinutes int) (*SleepSettings, error) {
+func (s *SleepService) UpdateSettings(id int64, actor auth.Actor, disabled bool, timeoutMinutes int) (*SleepSettings, error) {
 	if timeoutMinutes < 0 || timeoutMinutes > maxSleepTimeoutMinutes {
 		return nil, fmt.Errorf("timeout_minutes must be between 0 and %d", maxSleepTimeoutMinutes)
 	}
-	if _, err := queries.GetInstanceByUser(s.db, id, userID); err != nil {
+	inst, err := queries.GetInstanceForActor(s.db, id, actor)
+	if err != nil {
 		return nil, fmt.Errorf("instance not found")
 	}
-	if err := queries.UpdateInstanceSleep(s.db, id, userID, disabled, timeoutMinutes); err != nil {
+	// UpdateInstanceSleep filters on user_id, so it must carry the owner's id: an admin
+	// editing someone else's policy would otherwise update zero rows and still get 200.
+	if err := queries.UpdateInstanceSleep(s.db, id, inst.UserID, disabled, timeoutMinutes); err != nil {
 		return nil, fmt.Errorf("save auto-stop settings: %w", err)
 	}
-	return s.GetSettings(id, userID)
+	return s.GetSettings(id, actor)
 }
 
 // ResetTimer pushes the deadline back by a full timeout, for a user who is
 // working in an instance the platform has no way of knowing is in use:
 // last_active_at is only written on create and start, never by SSH or the
 // web terminal.
-func (s *SleepService) ResetTimer(id, userID int64) (*SleepSettings, error) {
-	if _, err := queries.GetInstanceByUser(s.db, id, userID); err != nil {
+func (s *SleepService) ResetTimer(id int64, actor auth.Actor) (*SleepSettings, error) {
+	if _, err := queries.GetInstanceForActor(s.db, id, actor); err != nil {
 		return nil, fmt.Errorf("instance not found")
 	}
 	if err := queries.UpdateInstanceLastActive(s.db, id); err != nil {
 		return nil, fmt.Errorf("reset auto-stop timer: %w", err)
 	}
-	return s.GetSettings(id, userID)
+	return s.GetSettings(id, actor)
 }
 
 func (s *SleepService) settingsFor(inst *models.Instance) *SleepSettings {

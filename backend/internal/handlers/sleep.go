@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/services"
 )
 
@@ -19,13 +18,16 @@ func NewSleepHandler(svc *services.SleepService) *SleepHandler {
 }
 
 func (h *SleepHandler) Get(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	set, err := h.svc.GetSettings(id, user.ID)
+	set, err := h.svc.GetSettings(id, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -41,7 +43,10 @@ type updateSleepRequest struct {
 }
 
 func (h *SleepHandler) Update(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -53,7 +58,7 @@ func (h *SleepHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, err := h.svc.GetSettings(id, user.ID)
+	current, err := h.svc.GetSettings(id, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -67,7 +72,7 @@ func (h *SleepHandler) Update(w http.ResponseWriter, r *http.Request) {
 		timeout = *req.TimeoutMinutes
 	}
 
-	set, err := h.svc.UpdateSettings(id, user.ID, disabled, timeout)
+	set, err := h.svc.UpdateSettings(id, actor, disabled, timeout)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -77,13 +82,16 @@ func (h *SleepHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Reset pushes the auto-stop deadline back by a full timeout.
 func (h *SleepHandler) Reset(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
 	id, err := parseID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	set, err := h.svc.ResetTimer(id, user.ID)
+	set, err := h.svc.ResetTimer(id, actor)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
