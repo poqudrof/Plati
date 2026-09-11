@@ -59,6 +59,22 @@ type CreateInstanceRequest struct {
 	UserID                int64  `json:"-"`
 	SSHKeyModeOverride    string `json:"ssh_key_mode,omitempty"`
 	TailscaleModeOverride string `json:"tailscale_mode,omitempty"`
+
+	// Settings that live on the instance row rather than in the template, carried over
+	// when an instance is copied so the copy comes up like the one it was made from.
+	// They are deliberately not part of the JSON body: the limits are administrative
+	// (PUT /admin/instances/{id}/resources) and the auto-stop policy is set on the
+	// instance afterwards, so a user creating a workspace cannot pick either here.
+	LimitsCPU           string `json:"-"`
+	LimitsMemory        string `json:"-"`
+	SleepDisabled       bool   `json:"-"`
+	SleepTimeoutMinutes int    `json:"-"`
+}
+
+// carriedOverrides is the per-instance half of what instanceResources merges. Create and
+// CreateAsync have no row yet, so the request carries the values a copy inherits.
+func carriedOverrides(req CreateInstanceRequest) *models.Instance {
+	return &models.Instance{LimitsCPU: req.LimitsCPU, LimitsMemory: req.LimitsMemory}
 }
 
 // persistenceDir is the parsed form of one element from template.persistence_dirs.
@@ -449,8 +465,10 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
-	// Parse template resources. No instance row exists yet, so there is no override.
-	resources := instanceResources(tmpl, nil)
+	// Parse template resources. There is no row yet, so any override comes from the
+	// request — a copy is built with the limits of the instance it was copied from,
+	// before the container exists, not patched onto it afterwards.
+	resources := instanceResources(tmpl, carriedOverrides(req))
 
 	profiles := templateProfiles(tmpl)
 	if err := verifyProfiles(client, server.Name, profiles); err != nil {
@@ -533,12 +551,16 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 
 	// Save to DB first so we have an instanceID for the join table
 	inst := &models.Instance{
-		Name:       req.Name,
-		UserID:     req.UserID,
-		TemplateID: req.TemplateID,
-		ServerID:   server.ID,
-		IncusName:  incusName,
-		Status:     "running",
+		Name:                req.Name,
+		UserID:              req.UserID,
+		TemplateID:          req.TemplateID,
+		ServerID:            server.ID,
+		IncusName:           incusName,
+		Status:              "running",
+		LimitsCPU:           req.LimitsCPU,
+		LimitsMemory:        req.LimitsMemory,
+		SleepDisabled:       req.SleepDisabled,
+		SleepTimeoutMinutes: req.SleepTimeoutMinutes,
 	}
 	if firstVolID > 0 {
 		inst.VolumeID.Valid = true
@@ -626,8 +648,8 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
-	// No instance row exists yet, so there is no override to apply.
-	resources := instanceResources(tmpl, nil)
+	// No row yet: the only overrides are the ones the request carries (see Create).
+	resources := instanceResources(tmpl, carriedOverrides(req))
 	profiles := templateProfiles(tmpl)
 	if err := verifyProfiles(client, server.Name, profiles); err != nil {
 		return nil, err
@@ -639,12 +661,16 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 	// ── Create DB record immediately ──
 
 	inst := &models.Instance{
-		Name:       req.Name,
-		UserID:     req.UserID,
-		TemplateID: req.TemplateID,
-		ServerID:   server.ID,
-		IncusName:  incusName,
-		Status:     "creating",
+		Name:                req.Name,
+		UserID:              req.UserID,
+		TemplateID:          req.TemplateID,
+		ServerID:            server.ID,
+		IncusName:           incusName,
+		Status:              "creating",
+		LimitsCPU:           req.LimitsCPU,
+		LimitsMemory:        req.LimitsMemory,
+		SleepDisabled:       req.SleepDisabled,
+		SleepTimeoutMinutes: req.SleepTimeoutMinutes,
 	}
 	instID, err := queries.CreateInstance(s.db, inst)
 	if err != nil {
@@ -1771,11 +1797,20 @@ func (s *InstanceService) DuplicateForUser(id, targetUserID int64) (*models.Inst
 // duplicateInto creates a new instance using the same template as the source,
 // owned by targetUserID, then deep-copies volume data from source to destination.
 func (s *InstanceService) duplicateInto(orig *models.Instance, targetUserID int64) (*models.Instance, error) {
-	// Create a fresh instance with empty volumes.
+	// Create a fresh instance with empty volumes. Everything that comes from the
+	// template comes with it for free — image, profiles, incus_config, storage layout —
+	// but the settings stored on the source row have to be carried explicitly, or the
+	// copy boots on the template's limits and back inside the auto-stop sweep, which is
+	// not the same workspace. The owner's own identity (SSH keys, secrets, tailnet
+	// hostname) is deliberately left out: Create resolves it from targetUserID.
 	dst, err := s.Create(CreateInstanceRequest{
-		Name:       s.freeInstanceName(targetUserID, orig.Name+"-copy"),
-		TemplateID: orig.TemplateID,
-		UserID:     targetUserID,
+		Name:                s.freeInstanceName(targetUserID, orig.Name+"-copy"),
+		TemplateID:          orig.TemplateID,
+		UserID:              targetUserID,
+		LimitsCPU:           orig.LimitsCPU,
+		LimitsMemory:        orig.LimitsMemory,
+		SleepDisabled:       orig.SleepDisabled,
+		SleepTimeoutMinutes: orig.SleepTimeoutMinutes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create duplicate: %w", err)

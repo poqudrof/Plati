@@ -422,6 +422,33 @@ Two things to know about the model side:
 - `incus_name` is `plati-{user_id}-{name}` and `(incus_name, server_id)` is unique, so a second
   copy into the same account would collide. `freeInstanceName` picks `…-copy`, `…-copy-2`, …
 
+## Copying an Instance
+
+`POST /instances/{id}/duplicate` (own) and `POST /admin/instances/{id}/duplicate` (any, with
+a `user_id` target) both land in `duplicateInto`, which creates a fresh instance from the
+same template and then streams each volume across: `tar -C {path} -cf -` on the source piped
+into `tar -C {path} -xf -` on the copy, matched **by mount path**, so a template with several
+persistence directories copies each one into the right place.
+
+What makes the copy start like the original is split in two:
+
+- **From the template**, for free: image, profiles, `incus_config`, storage layout.
+- **From the source row**, carried explicitly through `CreateInstanceRequest`: `limits_cpu`,
+  `limits_memory`, `sleep_disabled`, `sleep_timeout_minutes`. They are `json:"-"` — a user
+  creating a workspace cannot set them, only a copy inherits them. `queries.CreateInstance`
+  writes them in the INSERT rather than a follow-up UPDATE, because the container is built
+  from the limits *before* the row exists; patching them on afterwards would boot the copy
+  once on the template's values.
+
+What deliberately does **not** come across is the source owner's identity: `Create` resolves
+SSH keys, secrets and the tailnet hostname from the target user and the copy's own name. So
+the new owner gets a machine with their keys, their secrets and a free tailnet name, and adds
+their own Tailscale key afterwards (Preferences → personal mode, then rebuild) — that is the
+intended hand-over, and `instance_duplicate_test.go` walks through it.
+
+Names: `freeInstanceName` picks `…-copy`, `…-copy-2`, … because `incus_name` is
+`plati-{user_id}-{name}` and `(incus_name, server_id)` is unique.
+
 ## Admin Access to Any Instance
 
 Every instance-scoped route resolves through one function:

@@ -41,35 +41,64 @@ type runCall struct {
 	shellCmd     string // the /bin/sh -c argument, or joined command string
 }
 
+// execCall records one ExecInstance invocation together with whatever was fed to its
+// stdin. The duplicate path moves a volume's contents that way, so a test that only
+// looked at the command could not tell a copy that streamed the data from one that
+// piped nothing into tar.
+type execCall struct {
+	instanceName string
+	command      []string
+	stdin        string
+}
+
+// pushCall records one PushFile invocation. pushedFiles is keyed by remote path alone,
+// so two instances writing /root/.ssh/authorized_keys overwrite each other there; any
+// assertion about which instance received which file has to come from here.
+type pushCall struct {
+	instanceName string
+	path         string
+	content      []byte
+}
+
 type mockIncusClient struct {
 	instances       map[string]*incusapi.Instance
 	instanceIPs     map[string]string
+	instanceImages  map[string]string // instance name → the image it was created from
 	volumes         map[string]int
 	pushedFiles     map[string][]byte // remote path → content
 	runCommandFn    func(name string, command []string) (string, error)
 	streamCommandFn func(name string, command []string) (io.ReadCloser, error)
+	execInstanceFn  func(name string, command []string, stdin io.ReadCloser) error
 
-	mu       sync.Mutex
-	runCalls []runCall // all RunCommand calls, for assertion
+	mu        sync.Mutex
+	runCalls  []runCall  // all RunCommand calls, for assertion
+	execCalls []execCall // all ExecInstance calls, with their stdin
+	pushCalls []pushCall // all PushFile calls, per instance
 }
 
 func newMockIncus() *mockIncusClient {
 	return &mockIncusClient{
-		instances:   make(map[string]*incusapi.Instance),
-		instanceIPs: make(map[string]string),
-		volumes:     make(map[string]int),
-		pushedFiles: make(map[string][]byte),
+		instances:      make(map[string]*incusapi.Instance),
+		instanceIPs:    make(map[string]string),
+		instanceImages: make(map[string]string),
+		volumes:        make(map[string]int),
+		pushedFiles:    make(map[string][]byte),
 	}
 }
 
 func (m *mockIncusClient) CreateInstance(name, image string, profiles []string, cfg map[string]string, devices map[string]map[string]string) error {
+	// Image, profiles and devices are kept, not just the config: they are half of what
+	// decides whether two containers boot the same way.
 	m.instances[name] = &incusapi.Instance{
 		Name:   name,
 		Status: "Running",
 		InstancePut: incusapi.InstancePut{
-			Config: cfg,
+			Config:   cfg,
+			Profiles: profiles,
+			Devices:  devices,
 		},
 	}
+	m.instanceImages[name] = image
 	m.instanceIPs[name] = "10.0.0.42"
 	return nil
 }
@@ -180,7 +209,47 @@ func (m *mockIncusClient) GetProfileNames() ([]string, error) {
 }
 
 func (m *mockIncusClient) ExecInstance(name string, command []string, env map[string]string, stdin io.ReadCloser, stdout io.WriteCloser, control func(conn *websocket.Conn)) error {
+	// Drain stdin the way the real client does, and keep what came through.
+	var data []byte
+	if stdin != nil {
+		data, _ = io.ReadAll(stdin)
+	}
+	m.mu.Lock()
+	m.execCalls = append(m.execCalls, execCall{instanceName: name, command: command, stdin: string(data)})
+	m.mu.Unlock()
+
+	if m.execInstanceFn != nil {
+		return m.execInstanceFn(name, command, io.NopCloser(bytes.NewReader(data)))
+	}
 	return nil
+}
+
+// execCallsFor returns every ExecInstance call made against an instance.
+func (m *mockIncusClient) execCallsFor(instanceName string) []execCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []execCall
+	for _, c := range m.execCalls {
+		if c.instanceName == instanceName {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// pushedFor returns the last content pushed to a path inside one instance, and whether
+// anything was pushed there at all.
+func (m *mockIncusClient) pushedFor(instanceName, path string) ([]byte, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var content []byte
+	found := false
+	for _, c := range m.pushCalls {
+		if c.instanceName == instanceName && c.path == path {
+			content, found = c.content, true
+		}
+	}
+	return content, found
 }
 
 func (m *mockIncusClient) RunCommand(name string, command []string) (string, error) {
@@ -268,6 +337,9 @@ func (m *mockIncusClient) StreamCommand(name string, command []string) (io.ReadC
 
 func (m *mockIncusClient) PushFile(instanceName, remotePath string, content []byte, uid, gid int64, mode int) error {
 	m.pushedFiles[remotePath] = content
+	m.mu.Lock()
+	m.pushCalls = append(m.pushCalls, pushCall{instanceName: instanceName, path: remotePath, content: append([]byte(nil), content...)})
+	m.mu.Unlock()
 	return nil
 }
 

@@ -66,11 +66,18 @@ func GetInstanceForActor(db *sqlx.DB, id int64, actor auth.Actor) (*models.Insta
 	return GetInstanceByUser(db, id, actor.UserID)
 }
 
+// CreateInstance inserts the row. The resource overrides and the auto-stop policy are
+// written here rather than left to a follow-up UPDATE because a copy has to carry the
+// settings of the instance it was made from, and the container is built from them before
+// this row exists — see InstanceService.duplicateInto. Their zero values are exactly the
+// column defaults, so an ordinary creation is unchanged.
 func CreateInstance(db *sqlx.DB, inst *models.Instance) (int64, error) {
 	res, err := db.Exec(
-		`INSERT INTO instances (name, user_id, template_id, server_id, volume_id, incus_name, status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO instances (name, user_id, template_id, server_id, volume_id, incus_name, status,
+		                        limits_cpu, limits_memory, sleep_disabled, sleep_timeout_minutes)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		inst.Name, inst.UserID, inst.TemplateID, inst.ServerID, inst.VolumeID, inst.IncusName, inst.Status,
+		inst.LimitsCPU, inst.LimitsMemory, inst.SleepDisabled, inst.SleepTimeoutMinutes,
 	)
 	if err != nil {
 		return 0, err
