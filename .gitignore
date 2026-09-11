@@ -68,4 +68,5 @@ incus-ui.crt
 config/plati.yaml.bak-*
 
 # Binaires téléchargés par les mixins (81 Mo)
-config/templates/mixins/dist/dist/
+config/templates/mixins/dist/sshx-linux-amd64
+config/templates/mixins/dist/openvscode-server-*.tar.gz

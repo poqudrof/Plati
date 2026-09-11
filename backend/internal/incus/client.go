@@ -308,7 +308,19 @@ func (c *Client) ExecInstance(name string, command []string, env map[string]stri
 	return nil
 }
 
+// ExitError reports a command that ran to completion inside the instance but exited
+// non-zero. The operation itself succeeded, so without it a failed command is
+// indistinguishable from a successful one.
+type ExitError struct {
+	Code int
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.Code)
+}
+
 // RunCommand executes a command in a non-interactive session and returns combined stdout+stderr.
+// A non-zero exit status is returned as an *ExitError, together with the output.
 func (c *Client) RunCommand(name string, command []string) (string, error) {
 	pr, pw := io.Pipe()
 
@@ -347,6 +359,10 @@ func (c *Client) RunCommand(name string, command []string) (string, error) {
 
 	if opErr != nil {
 		return string(out), fmt.Errorf("exec wait %s: %w", name, opErr)
+	}
+	// op.Wait only fails when the operation does; the command's own status is in its metadata.
+	if code, ok := op.Get().Metadata["return"].(float64); ok && code != 0 {
+		return string(out), fmt.Errorf("exec %s: %w", name, &ExitError{Code: int(code)})
 	}
 	return string(out), nil
 }

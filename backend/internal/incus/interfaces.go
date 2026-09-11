@@ -55,6 +55,8 @@ type IncusClient interface {
 
 	// Exec
 	ExecInstance(name string, command []string, env map[string]string, stdin io.ReadCloser, stdout io.WriteCloser, control func(conn *websocket.Conn)) error
+	// RunCommand returns combined stdout+stderr; a non-zero exit status is an *ExitError,
+	// so a script whose last command legitimately fails (a grep with no match) needs "|| true".
 	RunCommand(name string, command []string) (string, error)
 	// StreamCommand runs a command and returns its stdout as a streaming reader (for piping).
 	StreamCommand(name string, command []string) (io.ReadCloser, error)
