@@ -54,10 +54,10 @@ func NewInstanceService(db *sqlx.DB, pool *incus.Pool, userSvc *UserService, pre
 func (s *InstanceService) CreationLogs() *CreationLogManager { return s.creationLogs }
 
 type CreateInstanceRequest struct {
-	Name                 string `json:"name"`
-	TemplateID           int64  `json:"template_id"`
-	UserID               int64  `json:"-"`
-	SSHKeyModeOverride   string `json:"ssh_key_mode,omitempty"`
+	Name                  string `json:"name"`
+	TemplateID            int64  `json:"template_id"`
+	UserID                int64  `json:"-"`
+	SSHKeyModeOverride    string `json:"ssh_key_mode,omitempty"`
 	TailscaleModeOverride string `json:"tailscale_mode,omitempty"`
 }
 
@@ -276,6 +276,100 @@ func templateIncusConfig(t *models.Template) map[string]string {
 	return cfg
 }
 
+// templateProfiles decodes a template's profiles column, falling back to the default
+// profile when the column is unset, malformed, or an empty list. An empty list is not a
+// harmless value to pass straight through: Incus reads it as "attach no profiles at all",
+// so the container would come up without the default profile's network and root disk.
+func templateProfiles(t *models.Template) []string {
+	var profiles []string
+	if err := json.Unmarshal([]byte(t.Profiles), &profiles); err != nil || len(profiles) == 0 {
+		return []string{"default"}
+	}
+	return profiles
+}
+
+// verifyProfiles rejects a template that asks for an Incus profile the server does not
+// have. Incus reports this only from CreateInstance, at the very end of a creation: the
+// DB row already exists by then, so CreateAsync hands back an instance stuck in `error`
+// whose reason is buried in the creation log. Checking up front turns that into a
+// synchronous message naming the profile, before anything is written.
+//
+// A server whose profiles cannot be listed is deliberately not an error here: the
+// creation would fail on its own with a better message, and refusing on a transient
+// listing failure would block creations that used to succeed.
+func verifyProfiles(client incus.IncusClient, serverName string, profiles []string) error {
+	existing, err := client.GetProfileNames()
+	if err != nil {
+		log.Printf("warning: list profiles on %s: %v (skipping profile check)", serverName, err)
+		return nil
+	}
+	have := make(map[string]bool, len(existing))
+	for _, p := range existing {
+		have[p] = true
+	}
+	var missing []string
+	for _, p := range profiles {
+		if !have[p] {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("incus server %q has no profile %s (it has: %s): create it on the server or remove it from the template",
+		serverName, strings.Join(missing, ", "), strings.Join(existing, ", "))
+}
+
+// resolvePersistenceDirs returns the persistent volumes a template wants, including the
+// implicit one (the login user's home) that a template with no persistence block gets.
+// An ephemeral template has none at all.
+func resolvePersistenceDirs(tmpl *models.Template, resources map[string]string) []persistenceDir {
+	if tmpl.PersistenceMode == "ephemeral" {
+		return nil
+	}
+	var dirs []persistenceDir
+	if tmpl.PersistenceDirs != "" && tmpl.PersistenceDirs != "[]" {
+		json.Unmarshal([]byte(tmpl.PersistenceDirs), &dirs)
+	}
+	if len(dirs) == 0 {
+		dirs = defaultPersistenceDirs(tmpl.TerminalUser, resources)
+	}
+	return dirs
+}
+
+// provisionVolumes creates the template's persistent volumes, attaches them, and records
+// them against instID. Rebuild uses it as a recovery path: a creation that died before it
+// reached its volumes leaves an instance whose join table is empty, and Rebuild only ever
+// reattached what that table listed — so a repaired container came back with its home
+// inside the rootfs, silently ready to be wiped by the next rebuild.
+func (s *InstanceService) provisionVolumes(client incus.IncusClient, instID, serverID int64, incusName string, dirs []persistenceDir) {
+	for _, dir := range dirs {
+		pool := dir.Pool
+		if pool == "" {
+			pool = "default"
+		}
+		sizeGB := 20
+		fmt.Sscanf(dir.Size, "%dGB", &sizeGB)
+		if sizeGB == 0 {
+			fmt.Sscanf(dir.Size, "%dGiB", &sizeGB)
+		}
+		devName := deviceNameFromPath(dir.Path)
+		volName := incusName + "-" + devName
+
+		volID, err := queries.CreateVolume(s.db, volName, serverID, pool, sizeGB)
+		if err != nil {
+			log.Printf("warning: create volume record %s: %v", volName, err)
+			continue
+		}
+		if err := incus.CreateAndAttachVolume(client, pool, volName, incusName, devName, dir.Path, sizeGB); err != nil {
+			log.Printf("warning: volume attach failed for %s: %v", dir.Path, err)
+			queries.DeleteVolume(s.db, volID)
+			continue
+		}
+		queries.CreateInstanceVolume(s.db, instID, volID, dir.Path, devName)
+	}
+}
+
 // resourcesFromJSON decodes a template's resources column. The column holds whatever the
 // template YAML said, and every template on disk writes `cpu: 2` unquoted, so the values
 // are not uniformly strings: decoding straight into map[string]string makes the decoder
@@ -358,10 +452,9 @@ func (s *InstanceService) Create(req CreateInstanceRequest) (*models.Instance, e
 	// Parse template resources. No instance row exists yet, so there is no override.
 	resources := instanceResources(tmpl, nil)
 
-	// Parse profiles
-	var profiles []string
-	if err := json.Unmarshal([]byte(tmpl.Profiles), &profiles); err != nil {
-		profiles = []string{"default"}
+	profiles := templateProfiles(tmpl)
+	if err := verifyProfiles(client, server.Name, profiles); err != nil {
+		return nil, err
 	}
 
 	// Collect SSH keys for this user
@@ -535,9 +628,9 @@ func (s *InstanceService) CreateAsync(req CreateInstanceRequest) (*models.Instan
 
 	// No instance row exists yet, so there is no override to apply.
 	resources := instanceResources(tmpl, nil)
-	var profiles []string
-	if err := json.Unmarshal([]byte(tmpl.Profiles), &profiles); err != nil {
-		profiles = []string{"default"}
+	profiles := templateProfiles(tmpl)
+	if err := verifyProfiles(client, server.Name, profiles); err != nil {
+		return nil, err
 	}
 
 	publicKeys, privateKeys := s.collectSSHKeysForMode(req.UserID, sshMode)
@@ -782,27 +875,36 @@ func (s *InstanceService) Rebuild(id int64, actor auth.Actor) error {
 	prefs, _ := s.prefSvc.Get(inst.UserID)
 	publicKeys, privateKeys := s.collectSSHKeysForMode(inst.UserID, prefs.SSHKeyMode)
 
-	// Stop instance
-	_ = client.StopInstance(inst.IncusName)
-
-	// Detach all volumes using join table
-	instanceVols, _ := queries.ListInstanceVolumes(s.db, inst.ID)
-	for _, iv := range instanceVols {
-		_ = client.DetachVolume(inst.IncusName, iv.DeviceName)
+	// Reject a template asking for a profile the server lacks before tearing the
+	// container down, so a rebuild that cannot succeed does not destroy a working one.
+	if err := verifyProfiles(client, server.Name, templateProfiles(tmpl)); err != nil {
+		return err
 	}
 
-	// Delete instance
-	if err := client.DeleteInstance(inst.IncusName); err != nil {
-		return fmt.Errorf("delete for rebuild: %w", err)
+	instanceVols, _ := queries.ListInstanceVolumes(s.db, inst.ID)
+
+	// A creation that failed part-way leaves the row behind with no container. Deleting
+	// what is not there fails, which used to make Rebuild — the one operation meant to
+	// repair an instance — the one that could not repair this. Skip the teardown when the
+	// container is already gone and go straight to recreating it.
+	if _, err := client.GetInstance(inst.IncusName); err != nil {
+		log.Printf("rebuild %d: no container %s to tear down (%v), recreating from scratch", id, inst.IncusName, err)
+	} else {
+		_ = client.StopInstance(inst.IncusName)
+
+		for _, iv := range instanceVols {
+			_ = client.DetachVolume(inst.IncusName, iv.DeviceName)
+		}
+
+		if err := client.DeleteInstance(inst.IncusName); err != nil {
+			return fmt.Errorf("delete for rebuild: %w", err)
+		}
 	}
 
 	// Parse template data. inst carries the admin's overrides, which is what makes a
 	// resource change survive the destroy-and-recreate below.
 	resources := instanceResources(tmpl, inst)
-	var profiles []string
-	if err := json.Unmarshal([]byte(tmpl.Profiles), &profiles); err != nil {
-		profiles = []string{"default"}
-	}
+	profiles := templateProfiles(tmpl)
 
 	secretsEnv := s.buildSecretsEnv(inst.UserID, id, prefs.TailscaleMode)
 	secretsEnv["PLATI_TAILSCALE_HOSTNAME"] = sanitizeName(inst.Name)
@@ -817,14 +919,21 @@ func (s *InstanceService) Rebuild(id int64, actor auth.Actor) error {
 		return fmt.Errorf("recreate instance: %w", err)
 	}
 
-	// Reattach volumes from join table
-	for _, iv := range instanceVols {
-		vol, err := queries.GetVolume(s.db, iv.VolumeID)
-		if err != nil {
-			log.Printf("warning: get volume %d: %v", iv.VolumeID, err)
-			continue
+	// Reattach volumes from the join table. An instance whose creation died before its
+	// volumes existed has an empty one, so there is nothing to reattach and the volumes
+	// have to be created here instead — otherwise the repair hands back a container whose
+	// home lives in the rootfs and disappears at the next rebuild, without a warning.
+	if len(instanceVols) == 0 {
+		s.provisionVolumes(client, id, inst.ServerID, inst.IncusName, resolvePersistenceDirs(tmpl, resources))
+	} else {
+		for _, iv := range instanceVols {
+			vol, err := queries.GetVolume(s.db, iv.VolumeID)
+			if err != nil {
+				log.Printf("warning: get volume %d: %v", iv.VolumeID, err)
+				continue
+			}
+			_ = client.AttachVolume(vol.Pool, vol.Name, inst.IncusName, iv.DeviceName, iv.MountPath)
 		}
-		_ = client.AttachVolume(vol.Pool, vol.Name, inst.IncusName, iv.DeviceName, iv.MountPath)
 	}
 
 	// Reattach repos dir bind mount.
@@ -978,7 +1087,7 @@ type SshxURLResult struct {
 
 // InstanceStorageInfo describes the storage layout of an instance.
 type InstanceStorageInfo struct {
-	PersistenceMode string               `json:"persistence_mode"`
+	PersistenceMode string                `json:"persistence_mode"`
 	Volumes         []models.VolumeDetail `json:"volumes"`
 }
 

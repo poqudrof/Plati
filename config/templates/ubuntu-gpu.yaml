@@ -4,7 +4,6 @@ description: Ubuntu 24.04 LTS with Docker and Nvidia GPU passthrough.
 image: images:ubuntu/24.04/cloud
 profiles:
   - default
-  - docker
   - nvidia
 resources:
   cpu: 4

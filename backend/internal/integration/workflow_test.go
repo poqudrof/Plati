@@ -112,6 +112,11 @@ func (m *mockIncusClient) RenameInstance(name, newName string) error {
 }
 
 func (m *mockIncusClient) DeleteInstance(name string) error {
+	// Real Incus refuses to delete an instance that is not there. A mock that succeeds
+	// unconditionally hides exactly the Rebuild bug this suite is meant to catch.
+	if _, ok := m.instances[name]; !ok {
+		return fmt.Errorf("instance %s not found", name)
+	}
 	delete(m.instances, name)
 	delete(m.instanceIPs, name)
 	return nil

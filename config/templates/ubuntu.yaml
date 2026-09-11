@@ -4,7 +4,6 @@ description: Ubuntu 24.04 LTS dev environment.
 image: images:ubuntu/24.04/cloud
 profiles:
     - default
-    - docker
 resources:
     cpu: 2
     disk: 20GB
