@@ -5,6 +5,7 @@
   import { addNotification } from '$lib/stores/notifications';
   import { goto } from '$app/navigation';
   import DuplicateInstanceButton from './DuplicateInstanceButton.svelte';
+  import InstanceLinks from './InstanceLinks.svelte';
 
   let { instance, users = [], onRefresh = () => {} }: {
     instance: Instance;
@@ -95,6 +96,11 @@
     <div class="font-mono text-xs bg-gray-50 rounded px-3 py-2 text-gray-700 select-all">
       ssh user@{instance.ip_address}
     </div>
+  {/if}
+
+  <!-- Pinned links, managed from the instance page's Links tab -->
+  {#if instance.status !== 'creating'}
+    <InstanceLinks {instance} />
   {/if}
 
   <!-- Primary actions -->

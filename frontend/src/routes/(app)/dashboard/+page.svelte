@@ -3,6 +3,7 @@
   import type { Instance, AdminInstance, User } from '$lib/api/types';
   import InstanceCard from '$lib/components/InstanceCard.svelte';
   import DuplicateInstanceButton from '$lib/components/DuplicateInstanceButton.svelte';
+  import InstanceLinks from '$lib/components/InstanceLinks.svelte';
   import { addNotification } from '$lib/stores/notifications';
   import { currentUser } from '$lib/stores/auth';
   import { browser } from '$app/environment';
@@ -80,6 +81,7 @@
               <th class="px-4 py-3 font-semibold">Owner</th>
               <th class="px-4 py-3 font-semibold">Template</th>
               <th class="px-4 py-3 font-semibold">Status</th>
+              <th class="px-4 py-3 font-semibold">Links</th>
               <th class="px-4 py-3 font-semibold text-right">Duplicate</th>
             </tr>
           </thead>
@@ -103,6 +105,10 @@
                   <span class="px-2 py-0.5 rounded-full text-xs font-medium {statusColors[inst.status] ?? 'bg-gray-100'}">
                     {inst.status}
                   </span>
+                </td>
+                <!-- The owner's pinned links, as on their card -->
+                <td class="px-4 py-3">
+                  <InstanceLinks instance={inst} compact />
                 </td>
                 <td class="px-4 py-3">
                   <div class="flex justify-end">

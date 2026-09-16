@@ -9,6 +9,7 @@
   import StorageTab from '$lib/components/StorageTab.svelte';
   import StatusTab from '$lib/components/StatusTab.svelte';
   import ResourcesTab from '$lib/components/ResourcesTab.svelte';
+  import LinksTab from '$lib/components/LinksTab.svelte';
   import DangerZone from '$lib/components/DangerZone.svelte';
   import { currentUser } from '$lib/stores/auth';
 
@@ -72,7 +73,11 @@
   let installingKeyId = $state(0);
 
   // Tabs below the main card
-  let detailTab: 'status' | 'storage' | 'resources' | 'incus' | 'secrets' | 'ssh-keys' | 'sshx' | 'tailscale' | 'openvscode' = $state('status');
+  type DetailTab = 'status' | 'storage' | 'resources' | 'incus' | 'secrets' | 'ssh-keys' | 'sshx' | 'tailscale' | 'openvscode' | 'links';
+  // ?tab=links opens a tab directly — the dashboard card's "Manage" link lands on Links.
+  let detailTab: DetailTab = $state(
+    $page.url.searchParams.get('tab') === 'links' ? 'links' : 'status'
+  );
 
   // Creation log stream (while status === 'creating')
   type LogStep = { kind: 'step'; n: number; total: number; label: string; outputs: string[]; warning: string; expanded: boolean };
@@ -720,6 +725,11 @@
               {detailTab === 'openvscode' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >OpenVSCode</button>
         {/if}
+        <button
+          onclick={() => detailTab = 'links'}
+          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            {detailTab === 'links' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
+        >Links</button>
       </div>
 
       <!-- ── Status tab ── -->
@@ -1193,6 +1203,11 @@
             {/if}
           </div>
         </div>
+      {/if}
+
+      <!-- ── Links tab ── -->
+      {#if detailTab === 'links'}
+        <LinksTab instanceId={id} instanceStatus={instance?.status ?? 'stopped'} />
       {/if}
 
       <!-- ── OpenVSCode tab ── -->

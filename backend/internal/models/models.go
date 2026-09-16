@@ -203,10 +203,19 @@ type Instance struct {
 	// Per-instance resource overrides set by an administrator. The empty string means
 	// "inherit the template's value". Kept as strings because limits.cpu accepts a
 	// count, a pinned set ("0-3") or a percentage, and limits.memory carries its unit.
-	LimitsCPU    string    `db:"limits_cpu" json:"limits_cpu"`
-	LimitsMemory string    `db:"limits_memory" json:"limits_memory"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	LimitsCPU    string `db:"limits_cpu" json:"limits_cpu"`
+	LimitsMemory string `db:"limits_memory" json:"limits_memory"`
+
+	// Dashboard quick links: which built-in links are pinned to the card, plus hand-entered
+	// links as a JSON array of {"label","url","pinned"}. Served resolved by
+	// GET /instances/{id}/links.
+	LinkHostname   bool   `db:"link_hostname" json:"-"`
+	LinkOpenVSCode bool   `db:"link_openvscode" json:"-"`
+	LinkSshx       bool   `db:"link_sshx" json:"-"`
+	CustomLinks    string `db:"custom_links" json:"-"`
+
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // AdminInstance is an Instance enriched with the owner and template names.

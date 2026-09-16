@@ -115,6 +115,9 @@ func New(deps Deps) *chi.Mux {
 			// Resource limits: readable by the owner, writable only through the admin
 			// route below.
 			r.Get("/instances/{id}/resources", deps.InstanceHandler.Resources)
+			// Quick links listed on the dashboard card (OpenVSCode, SSHX, custom URLs)
+			r.Get("/instances/{id}/links", deps.InstanceHandler.Links)
+			r.Put("/instances/{id}/links", deps.InstanceHandler.UpdateLinks)
 			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
 			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
 			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)

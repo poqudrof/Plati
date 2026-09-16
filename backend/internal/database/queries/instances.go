@@ -198,3 +198,15 @@ func UpdateInstanceResources(db *sqlx.DB, id int64, cpu, memory string) error {
 	)
 	return err
 }
+
+// UpdateInstanceLinks stores the dashboard quick links of an instance owned by userID:
+// which built-in links are pinned, and the custom links as JSON already validated by the
+// service.
+func UpdateInstanceLinks(db *sqlx.DB, id, userID int64, hostname, openVSCode, sshx bool, customLinks string) error {
+	_, err := db.Exec(
+		`UPDATE instances SET link_hostname = ?, link_openvscode = ?, link_sshx = ?, custom_links = ?,
+		 updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`,
+		hostname, openVSCode, sshx, customLinks, id, userID,
+	)
+	return err
+}

@@ -268,6 +268,46 @@ export interface SshxURLResult {
   url: string;
 }
 
+/** A hand-entered link. Pinned ones are listed on the dashboard card. */
+export interface CustomLink {
+  label: string;
+  url: string;
+  pinned: boolean;
+}
+
+/** Stored state behind the Links tab: which built-in links are pinned, and the custom ones. */
+export interface InstanceLinkSettings {
+  hostname: boolean;
+  openvscode: boolean;
+  sshx: boolean;
+  custom: CustomLink[];
+}
+
+/** PUT body: omitted fields keep their value; `custom`, when present, replaces the list. */
+export type InstanceLinksUpdate = Partial<Omit<InstanceLinkSettings, 'custom'>> & {
+  custom?: (Omit<CustomLink, 'pinned'> & { pinned?: boolean })[];
+};
+
+export interface ResolvedLink {
+  /** `hostname` is https://<tailnet name>/, openable only when something serves 443. */
+  kind: 'hostname' | 'openvscode' | 'sshx' | 'custom';
+  label: string;
+  /** Empty when the link cannot be opened right now — `note` says why. */
+  url: string;
+  /** The tool's systemd unit is active (always true for custom and hostname links). */
+  active: boolean;
+  pinned: boolean;
+  /** Position in `settings.custom` for a custom link, -1 otherwise. */
+  index: number;
+  note?: string;
+}
+
+export interface InstanceLinksResult {
+  settings: InstanceLinkSettings;
+  /** Every link, pinned or not. */
+  links: ResolvedLink[];
+}
+
 export interface TailscaleServeRequest {
   port: number;
 }

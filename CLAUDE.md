@@ -291,6 +291,35 @@ The **Status** tab on the instance page (`StatusTab.svelte`, first tab, before S
 UI for all of it: state summary, the on/off switch, the timeout picker, the countdown to the
 next stop, and the reset button.
 
+## Instance Links
+
+Users note links per instance and **pin** the ones the dashboard card should list. The
+**Links** tab (`LinksTab.svelte`, last tab of the instance page, reachable as
+`/instances/{id}?tab=links` — the card's "Manage" link) manages them all; the card
+(`InstanceLinks.svelte`) only renders the pinned ones — as does the admin "All users" table,
+through the same component with `compact` (one chip per pinned link, in a Links column).
+
+Storage on the `instances` row: `link_hostname` (migration 021, default **1**),
+`link_openvscode`, `link_sshx` (migration 020, default 0) are the pins of the three
+built-in links; `custom_links` is JSON `[{"label","url","pinned"}]`, http(s) only — they are
+rendered as hrefs, so `normalizeCustomLinks` rejects anything else. A custom entry without
+`pinned` counts as pinned.
+
+`PUT /links` is a **partial** update, like the sleep settings: omitted fields keep their
+value, and `custom`, when present, replaces the whole list — the tab always sends it whole.
+
+Built-in URLs are never stored: `GetLinks` (`services/instance_links.go`) reads them at
+request time in **one exec** — tailnet DNS name, whether anything serves 443 (a Tailscale
+Serve handler on 443, or a local `:443` listener), `systemctl is-active` for both units, and
+the last `https://sshx.io/s/…` in the sshx journal. It returns every link, pinned or not,
+with `url` empty and a `note` when it cannot be opened right now.
+
+- **hostname** is `https://{tailnet name}/` — the Tailscale name only, never the IP. The card
+  drops it while it has no URL, which is why it can be pinned by default.
+- **OpenVSCode** is `http://{tailnet name or IP}:3463/?folder={home}`.
+
+The probe runs for every running instance each time the dashboard loads, like `/stats`.
+
 ## Storage Management
 
 Users can browse, download, and snapshot their persistent volumes from the **Storage** tab on the instance detail page.
@@ -350,6 +379,8 @@ Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (
 | `GET` | `/api/v1/instances/{id}/sleep` | Resolved auto-stop policy: override, platform default, and the deadline |
 | `PUT` | `/api/v1/instances/{id}/sleep` | Set `{"disabled": bool}` and/or `{"timeout_minutes": N}` (0 = platform default); both optional, omitted fields keep their value |
 | `POST` | `/api/v1/instances/{id}/sleep/reset` | Re-stamp `last_active_at` — buys another full timeout |
+| `GET` | `/api/v1/instances/{id}/links` | Every link (tailnet hostname, OpenVSCode, SSHX, custom), resolved, each with `pinned` |
+| `PUT` | `/api/v1/instances/{id}/links` | Partial: `{"hostname","openvscode","sshx": bool, "custom": [{"label","url","pinned"}]}`, omitted fields kept |
 | `GET` | `/api/v1/preferences` | Get current user's preferences |
 | `PUT` | `/api/v1/preferences` | Update SSH key mode / Tailscale mode |
 | `GET` | `/api/v1/admin/settings/tailscale-key` | Check if platform key configured (`{"configured": bool}`) |

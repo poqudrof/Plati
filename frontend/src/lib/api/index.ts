@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
 
 // Setup
 export const setup = {
@@ -72,6 +72,11 @@ export const instances = {
     api.put<SleepSettings>(`/api/v1/instances/${id}/sleep`, patch),
   resetSleepTimer: (id: number) =>
     api.post<SleepSettings>(`/api/v1/instances/${id}/sleep/reset`, {}),
+  // Instance links (Links tab): built-ins resolved to live URLs plus noted custom ones;
+  // the pinned ones are listed on the dashboard card.
+  links: (id: number) => api.get<InstanceLinksResult>(`/api/v1/instances/${id}/links`),
+  updateLinks: (id: number, patch: InstanceLinksUpdate) =>
+    api.put<InstanceLinksResult>(`/api/v1/instances/${id}/links`, patch),
   sshxUrl: (id: number) => api.get<SshxURLResult>(`/api/v1/instances/${id}/sshx-url`),
   // opts selects how far the rename propagates: the Incus container (stops and
   // restarts the instance) and/or the hostname inside Ubuntu.
