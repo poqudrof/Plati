@@ -1,5 +1,7 @@
 name: SSHX mixin
-# Registers a systemd unit: root.
+# Installs the binary and the unit: root. The session itself runs as the template's
+# terminal_user (ubuntu, arch…) — see the drop-in below — so whoever opens the link gets
+# that user's shell, not a root one.
 run_as: root
 files:
   - src: sshx.service
@@ -13,6 +15,11 @@ files:
 #  - apt-get install -y -q curl
 #  - curl -sSf https://sshx.io/get | sh
 post_create_commands:
+  # The user is set in a drop-in rather than in sshx.service because the unit file is
+  # pushed as-is and cannot know the template's user; {{terminal_user}} is substituted
+  # when the template is loaded (root for a template without one). WorkingDirectory=~ is
+  # that user's home, which is also the workspace sshx streams by default.
+  - mkdir -p /etc/systemd/system/sshx.service.d && printf '[Service]\nUser={{terminal_user}}\nWorkingDirectory=~\n' > /etc/systemd/system/sshx.service.d/10-user.conf
   - systemctl daemon-reload
   - systemctl enable sshx
   - systemctl start sshx

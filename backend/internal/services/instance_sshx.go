@@ -41,9 +41,15 @@ type SshxStatusResult struct {
 	// one the mixin ships on the server.
 	InstalledHash string `json:"installed_hash,omitempty"`
 	AvailableHash string `json:"available_hash,omitempty"`
+	// RunAs is the account the unit runs as ("root" when it sets no User=), ExpectedRunAs
+	// the template's terminal_user the mixin now assigns it.
+	RunAs         string `json:"run_as,omitempty"`
+	ExpectedRunAs string `json:"expected_run_as,omitempty"`
 	// UpdateAvailable is also true when the binary is missing entirely — that is the
 	// instance whose mixin file push failed at creation, leaving the unit crash-looping on
-	// a binary that was never there. For it, the same redeploy is the repair.
+	// a binary that was never there. For it, the same redeploy is the repair. And it is
+	// true when the unit runs as the wrong user: instances created before the mixin handed
+	// sshx to the terminal user still serve a root shell, and re-running the mixin fixes it.
 	UpdateAvailable bool `json:"update_available"`
 }
 
@@ -97,7 +103,10 @@ func (s *InstanceService) GetSshxStatus(id int64, actor auth.Actor) (*SshxStatus
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
 
-	res := &SshxStatusResult{}
+	res := &SshxStatusResult{ExpectedRunAs: "root"}
+	if tmpl, err := queries.GetTemplate(s.db, inst.TemplateID); err == nil && tmpl.TerminalUser != "" {
+		res.ExpectedRunAs = tmpl.TerminalUser
+	}
 	if hash, err := s.sshxAvailableHash(); err == nil {
 		res.AvailableHash = hash
 	}
@@ -106,6 +115,7 @@ func (s *InstanceService) GetSshxStatus(id int64, actor auth.Actor) (*SshxStatus
 	// report, not an error — it is exactly the case the update button exists to repair.
 	script := fmt.Sprintf(`[ -x %[1]s ] && echo "installed=1" || echo "installed=0"
 echo "active=$(systemctl is-active sshx 2>/dev/null)"
+echo "user=$(systemctl show -p User --value sshx 2>/dev/null)"
 if [ -x %[1]s ]; then
   echo "hash=$(sha256sum %[1]s 2>/dev/null | cut -d' ' -f1)"
   echo "version=$(%[1]s --version 2>/dev/null | head -1)"
@@ -129,9 +139,15 @@ exit 0`, sshxBinaryPath)
 			res.InstalledHash = v
 		case "version":
 			res.Version = v
+		case "user":
+			res.RunAs = v
 		}
 	}
-	res.UpdateAvailable = res.AvailableHash != "" && res.InstalledHash != res.AvailableHash
+	if res.RunAs == "" {
+		res.RunAs = "root" // no User= in the unit: systemd runs a system service as root
+	}
+	res.UpdateAvailable = res.AvailableHash != "" &&
+		(res.InstalledHash != res.AvailableHash || res.RunAs != res.ExpectedRunAs)
 	return res, nil
 }
 

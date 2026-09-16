@@ -101,20 +101,31 @@ func runAsUser(user, cmd string) string {
 	return fmt.Sprintf("su -l %s -c '%s'", user, strings.ReplaceAll(cmd, "'", `'\''`))
 }
 
-// commandsFor returns the mixin's commands ready to run: wrapped for the terminal user
-// when the mixin declares run_as: user, unchanged otherwise. A template without a
-// terminal_user (or whose terminal user is root) keeps the commands as-is.
+// terminalUserPlaceholder lets a root mixin name the template's login user — to hand it
+// a service (sshx runs as that user) or a group. Without a terminal_user it is "root".
+const terminalUserPlaceholder = "{{terminal_user}}"
+
+// commandsFor returns the mixin's commands ready to run: {{terminal_user}} substituted,
+// then wrapped for the terminal user when the mixin declares run_as: user. A template
+// without a terminal_user (or whose terminal user is root) keeps them unwrapped.
 func (m MixinYAML) commandsFor(mixinName, terminalUser string) []string {
-	if m.RunAs != MixinRunAsUser {
-		return m.PostCreateCommands
-	}
-	if terminalUser == "" || terminalUser == "root" {
-		log.Printf("warning: mixin %q declares run_as: user but the template has no terminal_user, running as root", mixinName)
-		return m.PostCreateCommands
+	user := terminalUser
+	if user == "" {
+		user = "root"
 	}
 	out := make([]string, len(m.PostCreateCommands))
 	for i, cmd := range m.PostCreateCommands {
-		out[i] = runAsUser(terminalUser, cmd)
+		out[i] = strings.ReplaceAll(cmd, terminalUserPlaceholder, user)
+	}
+	if m.RunAs != MixinRunAsUser {
+		return out
+	}
+	if user == "root" {
+		log.Printf("warning: mixin %q declares run_as: user but the template has no terminal_user, running as root", mixinName)
+		return out
+	}
+	for i, cmd := range out {
+		out[i] = runAsUser(user, cmd)
 	}
 	return out
 }

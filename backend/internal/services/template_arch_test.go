@@ -183,3 +183,56 @@ func TestArchTemplate_RebuildReinstallsWhatTheImageLacks(t *testing.T) {
 		t.Errorf("rebuild_commands contain a Debian-only command:\n%s", joined)
 	}
 }
+
+// sshx serves a shell to anyone holding the session link, so it must run as the
+// template's login user, never as root. Checked on the resolved commands of every shipped
+// template that includes it, Ubuntu and Arch alike.
+func TestShippedTemplates_SshxRunsAsTheTerminalUser(t *testing.T) {
+	dir := shippedTemplatesDir(t)
+	files, _ := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	checked := 0
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		var head struct {
+			TerminalUser string   `yaml:"terminal_user"`
+			Includes     []string `yaml:"includes"`
+		}
+		if err := yaml.Unmarshal(data, &head); err != nil {
+			t.Fatalf("parse %s: %v", f, err)
+		}
+		if !slicesContains(head.Includes, "sshx") {
+			continue
+		}
+		checked++
+		slug := strings.TrimSuffix(filepath.Base(f), ".yaml")
+		t.Run(slug, func(t *testing.T) {
+			if head.TerminalUser == "" || head.TerminalUser == "root" {
+				t.Fatalf("template ships sshx but has no non-root terminal_user to run it as")
+			}
+			_, firstInit, _ := loadShippedTemplate(t, slug)
+			joined := strings.Join(firstInit, "\n")
+			if strings.Contains(joined, "{{terminal_user}}") {
+				t.Errorf("placeholder left unresolved in the template's commands")
+			}
+			want := "User=" + head.TerminalUser + `\n`
+			if !strings.Contains(joined, "sshx.service.d") || !strings.Contains(joined, want) {
+				t.Errorf("no sshx drop-in with %q in the resolved commands:\n%s", want, joined)
+			}
+		})
+	}
+	if checked == 0 {
+		t.Fatal("no shipped template includes sshx — the guard tested nothing")
+	}
+}
+
+func slicesContains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

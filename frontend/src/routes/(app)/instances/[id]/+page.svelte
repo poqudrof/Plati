@@ -66,7 +66,9 @@
       if (!sshxStatus.service_active) {
         addNotification('error', 'SSHX was deployed but the service is not running');
       } else if (sshxStatus.update_available) {
-        addNotification('error', 'SSHX still reports a different binary after the update');
+        addNotification('error', sshxStatus.run_as !== sshxStatus.expected_run_as
+          ? `SSHX still runs as ${sshxStatus.run_as}, not ${sshxStatus.expected_run_as}`
+          : 'SSHX still reports a different binary after the update');
       } else {
         addNotification('success', wasInstalled ? 'SSHX updated' : 'SSHX installed');
       }
@@ -1174,9 +1176,17 @@
                     {sshxStatus.installed_hash.slice(0, 12)}
                   </span>
                 {/if}
+                {#if sshxStatus.run_as}
+                  <span class="text-xs {sshxStatus.run_as !== sshxStatus.expected_run_as ? 'text-amber-700' : 'text-gray-500'}"
+                    title="Account the sshx service runs as — the shell anyone with the link gets">
+                    runs as <span class="font-mono">{sshxStatus.run_as}</span>
+                  </span>
+                {/if}
                 {#if sshxStatus.update_available}
                   <span class="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 border border-amber-200">
-                    {sshxStatus.installed ? 'update available' : 'missing'}
+                    {!sshxStatus.installed ? 'missing'
+                      : sshxStatus.installed_hash === sshxStatus.available_hash ? `should run as ${sshxStatus.expected_run_as}`
+                      : 'update available'}
                   </span>
                 {:else}
                   <span class="text-xs text-gray-500">up to date</span>

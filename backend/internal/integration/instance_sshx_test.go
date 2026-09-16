@@ -181,3 +181,35 @@ func TestSshxUpdate_RefusesWhenTheMixinShipsNoBinary(t *testing.T) {
 		t.Errorf("error body does not say what is missing: %s", body)
 	}
 }
+
+// sshx used to run as root, so anyone with the session link got a root shell. The mixin now
+// hands the unit to the template's terminal_user; the status must say who it runs as, so an
+// instance created before that change can be spotted — and repaired by the same update.
+func TestSshxStatus_ReportsTheUserTheServiceRunsAs(t *testing.T) {
+	h := newHarness(t)
+	defer h.teardown()
+
+	id := newRunningInstance(t, h, "sshx-user")
+
+	for _, c := range []struct{ user, want string }{
+		{"", "root"}, // no User= in the unit
+		{"ubuntu", "ubuntu"},
+	} {
+		h.mock.runCommandFn = func(_ string, _ []string) (string, error) {
+			return "installed=1\nactive=active\nuser=" + c.user + "\nhash=abc\n", nil
+		}
+		resp := h.do("GET", fmt.Sprintf("/api/v1/instances/%d/sshx", id), nil)
+		var got struct {
+			RunAs         string `json:"run_as"`
+			ExpectedRunAs string `json:"expected_run_as"`
+		}
+		mustJSON(t, resp, &got)
+		if got.RunAs != c.want {
+			t.Errorf("unit User=%q: run_as = %q, want %q", c.user, got.RunAs, c.want)
+		}
+		// The seeded template's terminal_user.
+		if got.ExpectedRunAs != "ubuntu" {
+			t.Errorf("expected_run_as = %q, want ubuntu", got.ExpectedRunAs)
+		}
+	}
+}

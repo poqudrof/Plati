@@ -25,8 +25,9 @@ post_create_commands:
   - mkdir -p /etc/docker && echo '{"storage-driver":"fuse-overlayfs","features":{"containerd-snapshotter":false}}' > /etc/docker/daemon.json
   - systemctl enable --now containerd docker
 # Two things this mixin deliberately leaves to the template:
-#   - `usermod -aG docker <terminal_user>`: a mixin has no way to interpolate the template's
-#     terminal_user into its commands, so the template does it in first_init_commands.
+#   - `usermod -aG docker <terminal_user>`: the template does it in first_init_commands.
+#     (Mixin commands can now say {{terminal_user}}, but the group change was left where
+#     it was — the Ubuntu templates do the same with the apt docker mixin.)
 #   - the rebuild path: mixin commands are merged into first_init_commands only, so they do
 #     not re-run on a rebuild. A template that wants Docker back after a rebuild has to
 #     repeat these commands in its own rebuild_commands.

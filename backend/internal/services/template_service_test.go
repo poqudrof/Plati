@@ -465,6 +465,24 @@ func TestCommandsForUserMixinEscapesQuotes(t *testing.T) {
 	}
 }
 
+// A root mixin that needs the login user — sshx hands its unit to it — names it with
+// {{terminal_user}}; without one the placeholder resolves to root rather than to "".
+func TestCommandsForSubstitutesTerminalUser(t *testing.T) {
+	m := MixinYAML{RunAs: MixinRunAsRoot, PostCreateCommands: []string{"printf 'User={{terminal_user}}\\n' > /etc/x.conf"}}
+	if got := m.commandsFor("sshx", "arch"); got[0] != `printf 'User=arch\n' > /etc/x.conf` {
+		t.Errorf("arch: got %s", got[0])
+	}
+	for _, user := range []string{"", "root"} {
+		if got := m.commandsFor("sshx", user); got[0] != `printf 'User=root\n' > /etc/x.conf` {
+			t.Errorf("terminal_user %q: got %s", user, got[0])
+		}
+	}
+	// The mixin's own slice must not be rewritten: templates with different users share it.
+	if m.PostCreateCommands[0] != "printf 'User={{terminal_user}}\\n' > /etc/x.conf" {
+		t.Errorf("mixin commands mutated: %s", m.PostCreateCommands[0])
+	}
+}
+
 // Without a terminal_user there is nobody to drop to; the mixin stays on root.
 func TestCommandsForUserMixinFallsBackToRoot(t *testing.T) {
 	m := MixinYAML{RunAs: MixinRunAsUser, PostCreateCommands: []string{"install-something"}}

@@ -341,7 +341,12 @@ export interface SshxStatusResult {
   version?: string;
   installed_hash?: string;
   available_hash?: string;
-  /** Also true when the binary is missing entirely, where the redeploy is the repair. */
+  /** Account the unit runs as ("root" when it sets no User=). */
+  run_as?: string;
+  /** The template's terminal_user, which the mixin assigns the unit to. */
+  expected_run_as?: string;
+  /** Also true when the binary is missing entirely, or when the unit runs as the wrong
+   *  user (instances created while sshx still ran as root) — the redeploy repairs both. */
   update_available: boolean;
 }
 

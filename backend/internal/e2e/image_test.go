@@ -751,6 +751,11 @@ func TestImage_Arch(t *testing.T) {
 			t.Logf("%s: active", svc)
 		}
 	}
+	// sshx hands a shell to anyone with the session link: it must be the terminal user's.
+	if u := strings.TrimSpace(run(t, client, name, "/bin/sh", "-c",
+		"ps -o user= -p $(systemctl show -p MainPID --value sshx)")); u != "arch" {
+		t.Errorf("sshx runs as %q, want arch", u)
+	}
 	if os.Getenv("TAILSCALE_AUTH_KEY") != "" {
 		status := run(t, client, name, "/bin/sh", "-c", "tailscale status || true")
 		t.Logf("tailscale status: %s", firstLine(status))
