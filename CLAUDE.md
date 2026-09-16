@@ -381,6 +381,8 @@ Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (
 | `POST` | `/api/v1/instances/{id}/sleep/reset` | Re-stamp `last_active_at` — buys another full timeout |
 | `GET` | `/api/v1/instances/{id}/links` | Every link (tailnet hostname, OpenVSCode, SSHX, custom), resolved, each with `pinned` |
 | `PUT` | `/api/v1/instances/{id}/links` | Partial: `{"hostname","openvscode","sshx": bool, "custom": [{"label","url","pinned"}]}`, omitted fields kept |
+| `GET` | `/api/v1/instances/{id}/sshx` | sshx build in the instance vs the one the mixin ships (`update_available` compares sha256, not the version string) |
+| `POST` | `/api/v1/instances/{id}/sshx/update` | Redeploy the shipped sshx binary and restart the service |
 | `GET` | `/api/v1/preferences` | Get current user's preferences |
 | `PUT` | `/api/v1/preferences` | Update SSH key mode / Tailscale mode |
 | `GET` | `/api/v1/admin/settings/tailscale-key` | Check if platform key configured (`{"configured": bool}`) |

@@ -125,9 +125,16 @@ func TestShippedTemplates_DockerComesFromMixinNotProfile(t *testing.T) {
 		if err := yaml.Unmarshal(data, &head); err != nil {
 			t.Fatalf("parse %s: %v", f, err)
 		}
-		if !slices.Contains(head.Includes, "docker") {
+		// Any Docker mixin counts, not just the apt one: docker-arch installs Docker from
+		// the Arch repos and contributes the same security.nesting. Matching only "docker"
+		// would silently skip every Arch template and leave the invariant untested there.
+		i := slices.IndexFunc(head.Includes, func(inc string) bool {
+			return inc == "docker" || strings.HasPrefix(inc, "docker-")
+		})
+		if i < 0 {
 			continue
 		}
+		dockerMixin := head.Includes[i]
 		tmpl, err := s.templateFromYAML(data)
 		if err != nil {
 			t.Fatalf("parse %s: %v", f, err)
@@ -141,8 +148,8 @@ func TestShippedTemplates_DockerComesFromMixinNotProfile(t *testing.T) {
 			}
 		}
 		if cfg["security.nesting"] != "true" {
-			t.Errorf("%s includes the docker mixin but resolves to security.nesting=%q, want \"true\" — Docker will not run in it",
-				filepath.Base(f), cfg["security.nesting"])
+			t.Errorf("%s includes the %s mixin but resolves to security.nesting=%q, want \"true\" — Docker will not run in it",
+				filepath.Base(f), dockerMixin, cfg["security.nesting"])
 		}
 
 		for _, p := range templateProfiles(&models.Template{Profiles: tmpl.Profiles}) {
@@ -154,7 +161,7 @@ func TestShippedTemplates_DockerComesFromMixinNotProfile(t *testing.T) {
 	}
 
 	if checked == 0 {
-		t.Fatal("no shipped template includes the docker mixin — the guard tested nothing")
+		t.Fatal("no shipped template includes a docker mixin — the guard tested nothing")
 	}
-	t.Logf("checked %d templates including the docker mixin", checked)
+	t.Logf("checked %d templates including a docker mixin", checked)
 }

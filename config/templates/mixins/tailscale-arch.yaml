@@ -1,0 +1,22 @@
+name: Tailscale mixin (Arch)
+# pacman + systemd: root. The Arch counterpart of the `tailscale` mixin, which opens with
+# `apt-get install iptables` and fails on that step here.
+run_as: root
+# No file push: the apt mixin ships dist/tailscale-install.sh because Debian/Ubuntu need
+# the vendor repo, but Arch packages Tailscale itself — and that script's own Arch branch
+# does nothing more than the two commands below.
+post_create_commands:
+  # A partial upgrade (-Sy then -S) is unsupported on Arch, so sync, upgrade and install
+  # have to share one transaction. iptables is deliberately not listed: the image already
+  # ships it, and naming it risks a conflict with whichever provider is installed.
+  # Retried for the same reason as docker-arch: a truncated download aborts the whole
+  # transaction, and pacman drops the corrupted file so the next attempt succeeds.
+  - for i in 1 2 3; do pacman -Syu --noconfirm --needed tailscale && exit 0; sleep 5; done; exit 1
+  - systemctl enable --now tailscaled
+  # Same login line as the apt mixin: the key is read from the secrets env file rather than
+  # passed on the command line, and `|| true` keeps a rejected key from failing the create.
+  - '. /etc/profile.d/plati-env.sh && [ -n "$TAILSCALE_AUTH_KEY" ] && tailscale up --auth-key="$TAILSCALE_AUTH_KEY" --hostname="${PLATI_TAILSCALE_HOSTNAME:-$(hostname)}" || true'
+# Note: the instance page's "install Tailscale" action (InstallTailscale) hardcodes the
+# mixin name "tailscale", so it runs the apt one even on Arch. That stays harmless — it
+# pushes its own installer script, which detects Arch and uses pacman; only its apt line
+# fails, and is logged as a WARN and skipped.

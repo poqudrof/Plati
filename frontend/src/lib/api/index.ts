@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, SshxStatusResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
 
 // Setup
 export const setup = {
@@ -78,6 +78,11 @@ export const instances = {
   updateLinks: (id: number, patch: InstanceLinksUpdate) =>
     api.put<InstanceLinksResult>(`/api/v1/instances/${id}/links`, patch),
   sshxUrl: (id: number) => api.get<SshxURLResult>(`/api/v1/instances/${id}/sshx-url`),
+  // sshx is built in-house: the status compares the binary in the instance with the one
+  // the mixin currently ships, and the update redeploys it and restarts the service.
+  sshxStatus: (id: number) => api.get<SshxStatusResult>(`/api/v1/instances/${id}/sshx`),
+  sshxUpdate: (id: number) =>
+    api.post<SshxStatusResult>(`/api/v1/instances/${id}/sshx/update`, {}),
   // opts selects how far the rename propagates: the Incus container (stops and
   // restarts the instance) and/or the hostname inside Ubuntu.
   rename: (id: number, name: string, opts: RenameOptions = {}) =>

@@ -42,6 +42,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/homaserver/plati/internal/incus"
+	"github.com/homaserver/plati/internal/services"
 )
 
 // ── constants ──────────────────────────────────────────────────────────────────
@@ -75,6 +76,15 @@ type fullTemplateYAML struct {
 		Name string `yaml:"name"`
 		Dest string `yaml:"dest"`
 	} `yaml:"repos"`
+	// Persistence is read for the first-init sentinel path, which Plati derives from the
+	// first persistence directory.
+	Persistence struct {
+		Mode        string `yaml:"mode"`
+		Directories []struct {
+			Path string `yaml:"path"`
+			Size string `yaml:"size"`
+		} `yaml:"directories"`
+	} `yaml:"persistence"`
 }
 
 // mixinYAML is the parsed form of a mixin YAML file in config/templates/mixins/.
@@ -200,10 +210,22 @@ func containerName(slug string) string {
 // provision creates and starts a container, registering a cleanup that stops and deletes it.
 func provision(t *testing.T, client *incus.Client, name string, tmpl templateYAML, envVars map[string]string) {
 	t.Helper()
+	provisionWithConfig(t, client, name, tmpl, envVars, nil)
+}
+
+// provisionWithConfig is provision plus raw Incus config keys. Plati applies a template's
+// incus_config (and whatever its mixins contribute, e.g. security.nesting for Docker) at
+// creation; these tests build the container themselves, so a test that needs one of those
+// keys has to pass it here or the container comes up without it.
+func provisionWithConfig(t *testing.T, client *incus.Client, name string, tmpl templateYAML, envVars, extraCfg map[string]string) {
+	t.Helper()
 
 	cfg := map[string]string{}
 	for k, v := range envVars {
 		cfg["environment."+k] = v
+	}
+	for k, v := range extraCfg {
+		cfg[k] = v
 	}
 
 	t.Logf("creating container %s (image: %s, profiles: %v) …", name, tmpl.Image, tmpl.Profiles)
@@ -526,6 +548,217 @@ func TestImage_DockerInDocker(t *testing.T) {
 	out = run(t, client, name, "docker", "ps", "-q")
 	if out != "" {
 		t.Errorf("expected no running containers after cleanup, got: %s", out)
+	}
+}
+
+// ── Arch Linux ────────────────────────────────────────────────────────────────
+
+// withPacmanProxy prefixes pacman commands with proxy env vars. injectProxyViaExec only
+// writes apt and curl config; pacman reads http_proxy/https_proxy from the environment,
+// and `incus exec` runs without a login shell, so the values have to ride on the command.
+func withPacmanProxy(cmds []string, proxyURL string) []string {
+	if proxyURL == "" {
+		return cmds
+	}
+	out := make([]string, len(cmds))
+	for i, c := range cmds {
+		if strings.Contains(c, "pacman") {
+			c = fmt.Sprintf("http_proxy=%s https_proxy=%s %s", proxyURL, proxyURL, c)
+		}
+		out[i] = c
+	}
+	return out
+}
+
+// runRealSetupSteps executes a step list the way InstanceService.runSetupSteps does:
+// FileContent and FileSourcePath steps go through PushFile, everything else through
+// RunCommand, and a failing step is logged and the run continues. Keeping that tolerance
+// matters — production tolerates failures the same way, so a step that must not fail is
+// checked by its effect below rather than by its exit code.
+func runRealSetupSteps(t *testing.T, client *incus.Client, name string, steps []incus.SetupStep) {
+	t.Helper()
+	for i, step := range steps {
+		label := step.Label
+		if len(label) > 80 {
+			label = label[:77] + "..."
+		}
+		var err error
+		switch {
+		case len(step.FileContent) > 0:
+			err = client.PushFile(name, step.FileDest, step.FileContent, step.FileUID, step.FileGID, step.FileMode)
+		case step.FileSourcePath != "":
+			var content []byte
+			if content, err = os.ReadFile(step.FileSourcePath); err == nil {
+				err = client.PushFile(name, step.FileDest, content, step.FileUID, step.FileGID, step.FileMode)
+			}
+		default:
+			_, err = client.RunCommand(name, step.Cmd)
+		}
+		if err != nil {
+			t.Logf("WARN step %d/%d %q: %v", i+1, len(steps), label, err)
+			continue
+		}
+		t.Logf("step %d/%d: %s", i+1, len(steps), label)
+	}
+}
+
+// TestImage_Arch provisions the arch template through Plati's own setup pipeline instead of
+// replaying a hand-copied command list: the steps come from incus.BuildSetupSteps fed by
+// TemplateService.MixinSetupSteps, which is what InstanceService.Create runs. So it covers
+// the real mixin resolution (including the run_as: user wrapping), the real mixin binary
+// pushes, the real SSH-key and secrets injection, and the real first-init sentinel — none
+// of which a transcribed command list exercises.
+//
+// Docker and Tailscale come from the Arch-specific mixins: the apt-based `docker` and
+// `tailscale` mixins fail on this image, which is the whole reason those variants exist.
+func TestImage_Arch(t *testing.T) {
+	client := newIncusClient(t)
+	tmpl := loadTemplate(t, "arch")
+	fullTmpl := loadFullTemplate(t, "arch")
+	name := containerName("arch")
+
+	if fullTmpl.TerminalUser == "" {
+		t.Fatal("arch template declares no terminal_user")
+	}
+
+	// Resolve the mixins exactly as the server does at startup.
+	tsvc := services.NewTemplateService(nil, "")
+	if err := tsvc.LoadMixinsFromDir(filepath.Join(repoRoot(), "config", "templates")); err != nil {
+		t.Fatalf("load mixins: %v", err)
+	}
+
+	// The Incus config is the merge of what the template's mixins require. Taking it from
+	// them rather than hardcoding security.nesting is also the check that docker-arch
+	// really carries it — hardcoding would hide a template that never runs Docker.
+	extraCfg := map[string]string{}
+	for _, inc := range fullTmpl.Includes {
+		m, ok := tsvc.GetMixin(inc)
+		if !ok {
+			t.Fatalf("template includes mixin %q, which is not loaded", inc)
+		}
+		for k, v := range m.IncusConfig {
+			extraCfg[k] = v
+		}
+	}
+	if extraCfg["security.nesting"] != "true" {
+		t.Fatalf("no mixin of the arch template contributes security.nesting=true (got %v) — Docker cannot run in it", extraCfg)
+	}
+
+	provisionWithConfig(t, client, name, tmpl, nil, extraCfg)
+	waitReady(t, client, name)
+
+	proxyURL := startBridgeProxy(t)
+	if proxyURL != "" {
+		injectProxyViaExec(t, client, name, proxyURL)
+	}
+
+	// first_init_commands as templateFromYAML assembles them: the mixins' commands, already
+	// wrapped for their run_as, prepended to the template's own.
+	var mixinCmds []string
+	for _, st := range tsvc.MixinSetupSteps(fullTmpl.Includes, fullTmpl.TerminalUser) {
+		if st.FileDest == "" && len(st.Cmd) == 3 {
+			mixinCmds = append(mixinCmds, st.Cmd[2])
+		}
+	}
+	firstInit := withPacmanProxy(append(mixinCmds, fullTmpl.FirstInitCommands...), proxyURL)
+
+	// Secrets reach the instance through /etc/profile.d/plati-env.sh, not through Incus
+	// environment keys — that is what tailscale-arch's login line sources.
+	secrets := map[string]string{"PLATI_TAILSCALE_HOSTNAME": name}
+	if key := os.Getenv("TAILSCALE_AUTH_KEY"); key != "" {
+		secrets["TAILSCALE_AUTH_KEY"] = key
+	}
+
+	var sentinel string
+	if dirs := fullTmpl.Persistence.Directories; len(dirs) > 0 && fullTmpl.Persistence.Mode != "ephemeral" {
+		sentinel = dirs[0].Path + "/.plati-initialized"
+	}
+
+	const testPubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID/plati-e2e-test-key plati-e2e"
+	steps := incus.BuildSetupSteps(incus.SetupConfig{
+		PublicKeys:     []string{testPubKey},
+		Secrets:        secrets,
+		TerminalUser:   fullTmpl.TerminalUser,
+		IsFirstInit:    true,
+		FirstInitCmds:  firstInit,
+		RebuildCmds:    fullTmpl.RebuildCommands,
+		SentinelPath:   sentinel,
+		MixinFileSteps: tsvc.GetMixinFileSteps(fullTmpl.Includes),
+	})
+	t.Logf("running %d setup steps from the real pipeline …", len(steps))
+	runRealSetupSteps(t, client, name, steps)
+
+	// ── 1. What the pipeline itself was supposed to write ───────────────────
+	run(t, client, name, "id", fullTmpl.TerminalUser)
+	runContains(t, client, name, "plati-e2e", "cat", "/root/.ssh/authorized_keys")
+	runContains(t, client, name, "plati-e2e", "cat",
+		fmt.Sprintf("/home/%s/.ssh/authorized_keys", fullTmpl.TerminalUser))
+	runContains(t, client, name, "PLATI_TAILSCALE_HOSTNAME", "cat", "/etc/profile.d/plati-env.sh")
+	if sentinel != "" {
+		run(t, client, name, "test", "-f", sentinel)
+		t.Logf("first-init sentinel: %s", sentinel)
+	}
+	// The home is handed back to the user after setup wrote into it as root.
+	owner := run(t, client, name, "stat", "-c", "%U", fmt.Sprintf("/home/%s", fullTmpl.TerminalUser))
+	if owner != fullTmpl.TerminalUser {
+		t.Errorf("/home/%s is owned by %q, want %q", fullTmpl.TerminalUser, owner, fullTmpl.TerminalUser)
+	}
+	t.Logf("SSH keys, secrets, sentinel and home ownership: OK")
+
+	// ── 2. pacman installed the toolchain ───────────────────────────────────
+	gitVer := runContains(t, client, name, "git version", "git", "--version")
+	t.Logf("git: %s", gitVer)
+
+	// ── 3. sshd is active and carries the Plati drop-in ─────────────────────
+	if !waitForService(t, client, name, "sshd", 60*time.Second) {
+		t.Fatal("sshd did not become active within 60s — the instance would be unreachable")
+	}
+	run(t, client, name, "sshd", "-t")
+	runContains(t, client, name, "PasswordAuthentication no",
+		"cat", "/etc/ssh/sshd_config.d/plati.conf")
+	t.Logf("sshd: active, config valid")
+
+	// ── 4. Docker on the fuse-overlayfs driver ──────────────────────────────
+	if !waitForService(t, client, name, "docker", 90*time.Second) {
+		t.Fatal("docker did not become active within 90s")
+	}
+	driver := run(t, client, name, "docker", "info", "--format", "{{.Driver}}")
+	if driver != "fuse-overlayfs" {
+		t.Errorf("docker storage driver = %q, want \"fuse-overlayfs\" — native overlayfs fails in an unprivileged Incus container", driver)
+	}
+	groups := run(t, client, name, "id", "-nG", fullTmpl.TerminalUser)
+	if !strings.Contains(groups, "docker") {
+		t.Errorf("%s is not in the docker group (groups: %s)", fullTmpl.TerminalUser, groups)
+	}
+	t.Logf("docker: active on %s", driver)
+
+	// ── 5. Docker actually runs a container ─────────────────────────────────
+	run(t, client, name, "docker", "run", "-d",
+		"--network", "host", "--name", "plati-e2e-arch-nginx", "nginx:alpine")
+	time.Sleep(3 * time.Second)
+	out := runContains(t, client, name, "Welcome to nginx",
+		"curl", "--noproxy", "*", "-s", "http://localhost:80")
+	t.Logf("nginx HTTP response: %s", firstLine(out))
+	run(t, client, name, "docker", "rm", "-f", "plati-e2e-arch-nginx")
+
+	// ── 6. The services registered by the pushed-binary mixins ──────────────
+	// sshx and openvscode-server are what the hand-rolled version of this test never
+	// covered: their payloads reach the instance only through the pipeline's PushFile steps.
+	for _, svc := range []string{"sshx", "openvscode-server", "tailscaled"} {
+		if !waitForService(t, client, name, svc, 60*time.Second) {
+			t.Errorf("%s did not become active within 60s", svc)
+		} else {
+			t.Logf("%s: active", svc)
+		}
+	}
+	if os.Getenv("TAILSCALE_AUTH_KEY") != "" {
+		status := run(t, client, name, "/bin/sh", "-c", "tailscale status || true")
+		t.Logf("tailscale status: %s", firstLine(status))
+	}
+
+	// ── 7. Template metadata ────────────────────────────────────────────────
+	if fullTmpl.Slug != "arch" {
+		t.Errorf("unexpected slug: %s", fullTmpl.Slug)
 	}
 }
 

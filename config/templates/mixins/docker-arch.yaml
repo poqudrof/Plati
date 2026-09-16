@@ -1,0 +1,32 @@
+name: Docker mixin (Arch)
+# pacman + systemd: root. The Arch counterpart of the `docker` mixin, which installs
+# Docker CE from download.docker.com's Ubuntu repo with apt and so fails on every step here.
+run_as: root
+# Same reason as the apt mixin: Docker needs a nested user namespace inside the Incus
+# container, otherwise runc fails to write net.ipv4.ip_unprivileged_port_start when a
+# container publishes a port. A template including this mixin inherits the key.
+incus_config:
+  security.nesting: "true"
+post_create_commands:
+  # A partial upgrade (-Sy then -S) is unsupported on Arch, so sync, upgrade and install
+  # have to share one transaction. --needed makes a re-run a no-op.
+  #
+  # Retried because a truncated download makes pacman reject the package as "corrupted
+  # (invalid or corrupted package (PGP signature))" and abort the *whole* transaction,
+  # installing nothing — which surfaces downstream as the far more confusing "Unit
+  # containerd.service does not exist". --noconfirm answers yes to pacman's "delete
+  # corrupted file?", so the next attempt re-downloads it and succeeds. Observed twice in
+  # TestImage_Arch. The keyring is not at fault: the image ships 183 trusted keys and
+  # pacman-key --populate changes nothing.
+  - for i in 1 2 3; do pacman -Syu --noconfirm --needed docker docker-compose fuse-overlayfs && exit 0; sleep 5; done; exit 1
+  # Use the fuse-overlayfs graphdriver — native overlayfs fails in unprivileged Incus
+  # containers. Docker 29+ defaults to the containerd image store, whose snapshotter
+  # ignores "storage-driver" and falls back to overlayfs, so it must be turned off too.
+  - mkdir -p /etc/docker && echo '{"storage-driver":"fuse-overlayfs","features":{"containerd-snapshotter":false}}' > /etc/docker/daemon.json
+  - systemctl enable --now containerd docker
+# Two things this mixin deliberately leaves to the template:
+#   - `usermod -aG docker <terminal_user>`: a mixin has no way to interpolate the template's
+#     terminal_user into its commands, so the template does it in first_init_commands.
+#   - the rebuild path: mixin commands are merged into first_init_commands only, so they do
+#     not re-run on a rebuild. A template that wants Docker back after a rebuild has to
+#     repeat these commands in its own rebuild_commands.

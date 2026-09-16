@@ -119,6 +119,10 @@ func New(deps Deps) *chi.Mux {
 			r.Get("/instances/{id}/links", deps.InstanceHandler.Links)
 			r.Put("/instances/{id}/links", deps.InstanceHandler.UpdateLinks)
 			r.Get("/instances/{id}/sshx-url", deps.InstanceHandler.SshxURL)
+			// sshx is built in-house: the status compares the instance's binary with the
+			// one the mixin currently ships, and the update redeploys it on demand.
+			r.Get("/instances/{id}/sshx", deps.InstanceHandler.SshxStatus)
+			r.Post("/instances/{id}/sshx/update", deps.InstanceHandler.SshxUpdate)
 			r.Post("/instances/{id}/duplicate", deps.InstanceHandler.Duplicate)
 			r.Post("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServe)
 			r.Get("/instances/{id}/tailscale-serve", deps.InstanceHandler.TailscaleServeStatus)

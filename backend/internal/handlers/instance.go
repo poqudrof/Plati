@@ -415,6 +415,46 @@ func (h *InstanceHandler) TailscaleInstall(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+// SshxStatus reports the sshx build running in the instance against the one the server
+// ships, so the panel can offer an update.
+func (h *InstanceHandler) SshxStatus(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	result, err := h.svc.GetSshxStatus(id, actor)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SshxUpdate redeploys the shipped sshx binary into a running instance, restarts the
+// service, and returns the resulting status.
+func (h *InstanceHandler) SshxUpdate(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireActor(w, r)
+	if !ok {
+		return
+	}
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	result, err := h.svc.UpdateSshx(id, actor)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *InstanceHandler) TailscaleServeOff(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireActor(w, r)
 	if !ok {

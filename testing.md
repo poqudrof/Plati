@@ -68,19 +68,20 @@ a uniquely-named container and deletes it via `t.Cleanup` even on failure.
 
 **Requirements:**
 - Incus server accessible (default `https://127.0.0.1:8443`)
-- Container internet access (apt installs packages from Ubuntu mirrors)
+- Container internet access (packages come from the distro mirrors — apt for the Ubuntu templates, pacman for `arch`)
 - TLS client cert/key at `config/plati-client.crt` / `config/plati-client.key` (or via env vars)
 
-**Skip conditions:** Tests skip automatically when the cert files are missing or the Incus server is unreachable. `TestImage_Tailscale` also skips when the `tailscale` Incus profile hasn't been created.
+**Skip conditions:** Tests skip automatically when the cert files are missing or the Incus server is unreachable. A test whose template names an Incus profile the server does not have skips too (`provision` detects the "doesn't exist" error).
 
 | Test | Template | Checks |
 |------|----------|--------|
-| `TestImage_Tailscale` | `tailscale.yaml` | `tailscaled` systemd service active; tailscale joined (if `TAILSCALE_AUTH_KEY` set) |
-| `TestImage_SSHX` | `sshx.yaml` | `sshx` systemd service active; collaborative URL present in journal |
-| `TestImage_NodeDev` | `node-dev.yaml` | `node`, `npm`, `pnpm` binaries exist and report versions |
-| `TestImage_PythonDev` | `python-dev.yaml` | `python --version` → Python 3.x; `poetry` installed |
-| `TestImage_SiteCA` | `site-ca.yaml` | `node` installed; `/srv/site-ca` checked out; `node_modules` present |
-| `TestImage_DockerDev` | `docker-dev.yaml` | `docker` service active; nginx:alpine serves HTTP on port 80 (host network) |
+| `TestImage_SimpleWebServer` | `simple-webserver.yaml` | `webserver` service active; `/health` returns `{"status":"ok"}`; root path serves HTML |
+| `TestImage_DockerInDocker` | `ubuntu.yaml` + `docker` mixin | `docker` service active; nginx:alpine serves HTTP on port 80 (host network) |
+| `TestImage_Arch` | `arch.yaml` + all its mixins | Runs Plati's **real** setup pipeline (`incus.BuildSetupSteps` + `TemplateService.MixinSetupSteps`), not a hand-copied command list: mixin binaries pushed via `PushFile`, SSH keys and secrets written as production writes them, `security.nesting` taken from the mixin's own `incus_config`. Asserts: `arch` user and home ownership; `authorized_keys` for root and the terminal user; `plati-env.sh`; the first-init sentinel; `git` from pacman; `sshd` active with the Plati drop-in; Docker on the **fuse-overlayfs** driver running nginx; terminal user in the `docker` group; `sshx`, `openvscode-server` and `tailscaled` active |
+| `TestImage_QcmPocFormation` | `qcm-poc-formation.yaml` | `git` available; repo clone at the template's dest; `rebuild_commands` (git pull) fetch a new commit; SSH key injection |
+| `TestImage_SiteIAGen` | `site-ia-gen.yaml` | `git` available; repo clone; `rebuild_commands` fetch a new commit |
+
+Note the `e2e` build tag: without `-tags e2e` the package compiles to nothing and `go test` reports `ok` while running none of it.
 
 ```bash
 # Via top-level runner (also sets TAILSCALE_AUTH_KEY if already exported):
@@ -89,10 +90,10 @@ a uniquely-named container and deletes it via `t.Cleanup` even on failure.
 # Directly with env vars:
 TAILSCALE_AUTH_KEY=tskey-... \
 IMAGE_TIMEOUT_SEC=600 \
-  cd backend && go test -v -timeout 30m ./internal/e2e/...
+  cd backend && go test -v -tags e2e -timeout 30m ./internal/e2e/...
 
 # Single test:
-cd backend && go test -v -run TestImage_SSHX -timeout 30m ./internal/e2e/...
+cd backend && go test -v -tags e2e -run TestImage_Arch -timeout 30m ./internal/e2e/...
 ```
 
 **Env vars:**

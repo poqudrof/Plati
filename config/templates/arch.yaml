@@ -1,0 +1,52 @@
+name: Arch Linux
+slug: arch
+description: Arch Linux (rolling) dev environment with Docker.
+image: images:archlinux/cloud
+profiles:
+  - default
+resources:
+  cpu: 2
+  memory: 4GB
+  disk: 20GB
+terminal_user: arch
+includes:
+  # tailscale-arch, not tailscale: the latter opens with `apt-get install iptables`, which
+  # fails on Arch. (The instance page's "install Tailscale" action still runs the apt mixin
+  # — its name is hardcoded — but that stays harmless, see tailscale-arch.yaml.)
+  - tailscale-arch
+  - sshx
+  - openvscode-server
+  - claude-code
+  # docker-arch, not docker: the latter installs Docker CE from download.docker.com's
+  # Ubuntu repo with apt. It also contributes the security.nesting Docker needs here.
+  - docker-arch
+first_init_commands:
+  # One transaction: on Arch a partial upgrade (-Sy then -S) is unsupported, so the sync,
+  # the upgrade and the install have to happen in the same pacman call. Retried because a
+  # truncated download aborts the whole transaction (see docker-arch.yaml).
+  - for i in 1 2 3; do pacman -Syu --noconfirm --needed git curl wget base-devel openssh && exit 0; sleep 5; done; exit 1
+  - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+  # The unit is sshd here, not ssh as on Ubuntu.
+  - systemctl enable --now sshd
+  # The docker group already exists: mixin commands run before first_init_commands.
+  - usermod -aG docker arch
+# A rebuild recreates the container from the image and only /home/arch survives, so these
+# repeat the installs instead of just restarting services: the Arch image ships no sshd,
+# and without it a rebuilt instance would come back with no way to SSH in. Mixins do not
+# re-run on a rebuild either, which is why the docker-arch and tailscale-arch commands are
+# repeated here. --needed keeps the whole list a no-op for anything already present.
+rebuild_commands:
+  - for i in 1 2 3; do pacman -Syu --noconfirm --needed git curl wget base-devel openssh docker docker-compose fuse-overlayfs tailscale && exit 0; sleep 5; done; exit 1
+  - printf 'PasswordAuthentication no\nPubkeyAuthentication yes\n' > /etc/ssh/sshd_config.d/plati.conf
+  - systemctl enable --now sshd
+  - mkdir -p /etc/docker && echo '{"storage-driver":"fuse-overlayfs","features":{"containerd-snapshotter":false}}' > /etc/docker/daemon.json
+  - systemctl enable --now containerd docker
+  - usermod -aG docker arch
+  # The secrets env file is rewritten on every rebuild, so the auth key is available here.
+  - systemctl enable --now tailscaled
+  - '. /etc/profile.d/plati-env.sh && [ -n "$TAILSCALE_AUTH_KEY" ] && tailscale up --auth-key="$TAILSCALE_AUTH_KEY" --hostname="${PLATI_TAILSCALE_HOSTNAME:-$(hostname)}" || true'
+persistence:
+  mode: normal
+  directories:
+    - path: /home/arch
+      size: 20GB

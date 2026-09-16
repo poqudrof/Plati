@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { instances, admin, templates } from '$lib/api';
-  import type { Instance, Server, InstanceSecret, InstanceAuthorizedKey, IncusDetail, IncusConfigUpdate, Template, TailscaleServeResult, TailscaleStatusResult, InstanceStorageInfo } from '$lib/api/types';
+  import type { Instance, Server, InstanceSecret, InstanceAuthorizedKey, IncusDetail, IncusConfigUpdate, Template, SshxStatusResult, TailscaleServeResult, TailscaleStatusResult, InstanceStorageInfo } from '$lib/api/types';
   import { goto } from '$app/navigation';
   import { addNotification } from '$lib/stores/notifications';
   import Terminal from '$lib/components/Terminal.svelte';
@@ -39,6 +39,46 @@
   let sshxUrl = $state('');
   let sshxLoading = $state(false);
   let sshxRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // sshx is built in-house, so an instance can be running an older binary than the one the
+  // server currently ships. update_available is decided server-side on the sha256, not on
+  // the version string — a local rebuild does not necessarily move that string.
+  let sshxStatus = $state<SshxStatusResult | null>(null);
+  let sshxUpdating = $state(false);
+
+  async function loadSshxStatus() {
+    // Same guard as the other per-instance probes: the endpoint execs into the container,
+    // so it answers 503 on a stopped one. A stopped instance therefore shows the tab only
+    // when its template ships sshx — there is no way to look inside it.
+    if (!browser || !instance || instance.status !== 'running') return;
+    try {
+      sshxStatus = await instances.sshxStatus(id);
+    } catch {
+      sshxStatus = null; // stopped mid-flight, or the endpoint is unavailable
+    }
+  }
+
+  async function updateSshx() {
+    sshxUpdating = true;
+    try {
+      const wasInstalled = sshxStatus?.installed ?? false;
+      sshxStatus = await instances.sshxUpdate(id);
+      if (!sshxStatus.service_active) {
+        addNotification('error', 'SSHX was deployed but the service is not running');
+      } else if (sshxStatus.update_available) {
+        addNotification('error', 'SSHX still reports a different binary after the update');
+      } else {
+        addNotification('success', wasInstalled ? 'SSHX updated' : 'SSHX installed');
+      }
+      // Restarting the service starts a new collaborative session, so the old URL is dead.
+      sshxUrl = '';
+      loadSshxUrl();
+    } catch (e) {
+      addNotification('error', e instanceof Error ? e.message : 'SSHX update failed');
+    } finally {
+      sshxUpdating = false;
+    }
+  }
 
   // Tailscale Serve
   let tsServeStatus = $state<TailscaleServeResult | null>(null);
@@ -99,7 +139,10 @@
   let isForeign = $state(false);
   let incusUIUrl = $derived(server ? `${server.endpoint}/ui` : null);
   let includes = $derived((() => { try { return JSON.parse(template?.includes ?? '[]') as string[]; } catch { return [] as string[]; } })());
-  let hasSshx = $derived(includes.includes('sshx'));
+  // Shown when the template ships the mixin, or when the instance turns out to carry the
+  // binary anyway: sshx can be installed into a workspace whose template does not include
+  // it, and that install would otherwise have no UI at all — not even to update it.
+  let hasSshx = $derived(includes.includes('sshx') || (sshxStatus?.installed ?? false));
   let hasTailscale = $derived(includes.includes('tailscale'));
   // The login user and their home, shared by the Storage, SSH and OpenVSCode tabs.
   let termUser = $derived(template?.terminal_user || 'root');
@@ -139,6 +182,10 @@
       }
       if (browser && instance?.status === 'running') {
         loadSshxUrl();
+        // Probed at load, not only when the SSHX tab is clicked: the tab is what this
+        // answer decides to show, so waiting for a click on it would never happen for an
+        // instance whose template does not ship the mixin.
+        loadSshxStatus();
         loadTsServeStatus();
         loadTsStatus();
       }
@@ -178,8 +225,11 @@
   }
 
   async function loadSshxUrl() {
-    if (!browser || !instance || instance.status !== 'running') return;
+    // Cleared before the guard, not after it: an instance that stops while the page is
+    // open must cancel the pending retry, rather than leave one armed to fire into a
+    // container that is no longer there.
     if (sshxRefreshTimer) { clearTimeout(sshxRefreshTimer); sshxRefreshTimer = null; }
+    if (!browser || !instance || instance.status !== 'running') return;
     sshxLoading = true;
     try {
       const result = await instances.sshxUrl(id);
@@ -706,7 +756,7 @@
         >SSH Access</button>
         {#if hasSshx}
           <button
-            onclick={() => detailTab = 'sshx'}
+            onclick={() => { detailTab = 'sshx'; loadSshxStatus(); }}
             class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
               {detailTab === 'sshx' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >SSHX</button>
@@ -1080,24 +1130,75 @@
 
       <!-- ── SSHX tab ── -->
       {#if detailTab === 'sshx'}
-        <div class="p-6">
-          <h3 class="text-base font-semibold mb-4">SSHX Collaborative Terminal</h3>
-          {#if sshxUrl}
-            <div class="flex items-center gap-2">
-              <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{sshxUrl}</div>
-              <button onclick={() => navigator.clipboard.writeText(sshxUrl).then(() => addNotification('success', 'Copied'))}
-                class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
-              <a href={sshxUrl} target="_blank" rel="noopener noreferrer"
-                class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm whitespace-nowrap">
-                Open ↗
-              </a>
-            </div>
-          {:else}
-            <div class="flex items-center gap-2 text-sm text-gray-500">
-              <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary shrink-0"></div>
-              <span>Waiting for SSHX service to start…</span>
-            </div>
-          {/if}
+        <div class="p-6 space-y-6">
+          <div>
+            <h3 class="text-base font-semibold mb-4">SSHX Collaborative Terminal</h3>
+            {#if sshxUrl}
+              <div class="flex items-center gap-2">
+                <div class="flex-1 p-3 bg-gray-50 rounded font-mono text-sm break-all">{sshxUrl}</div>
+                <button onclick={() => navigator.clipboard.writeText(sshxUrl).then(() => addNotification('success', 'Copied'))}
+                  class="px-3 py-2 border rounded hover:bg-gray-50 text-sm whitespace-nowrap">Copy</button>
+                <a href={sshxUrl} target="_blank" rel="noopener noreferrer"
+                  class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm whitespace-nowrap">
+                  Open ↗
+                </a>
+              </div>
+            {:else if instance?.status !== 'running'}
+              <!-- Nothing is being probed here: both sshx calls bail out on a stopped
+                   instance. The spinner below would claim otherwise, and would spin for
+                   as long as the page stayed open. -->
+              <p class="text-sm text-gray-500">
+                The instance is stopped. SSHX runs inside it, so there is no session to
+                join — start the instance to get a collaborative terminal link.
+              </p>
+            {:else}
+              <div class="flex items-center gap-2 text-sm text-gray-500">
+                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary shrink-0"></div>
+                <span>Waiting for SSHX service to start…</span>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Build. sshx is maintained in-house: publishing a new one means replacing the
+               binary the sshx mixin ships, and every instance can then pull it from here. -->
+          <div class="pt-4 border-t">
+            <h4 class="text-sm font-semibold mb-3">Build</h4>
+            {#if sshxStatus}
+              <div class="flex items-center gap-3 flex-wrap">
+                <span class="inline-flex items-center gap-2 text-sm text-gray-600">
+                  <span class="inline-block w-2 h-2 rounded-full shrink-0 {sshxStatus.service_active ? 'bg-green-500' : 'bg-red-500'}"></span>
+                  {sshxStatus.installed ? (sshxStatus.version || 'installed') : 'not installed'}
+                </span>
+                {#if sshxStatus.installed_hash}
+                  <span class="font-mono text-xs text-gray-500" title="sha256 of the binary in this instance">
+                    {sshxStatus.installed_hash.slice(0, 12)}
+                  </span>
+                {/if}
+                {#if sshxStatus.update_available}
+                  <span class="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 border border-amber-200">
+                    {sshxStatus.installed ? 'update available' : 'missing'}
+                  </span>
+                {:else}
+                  <span class="text-xs text-gray-500">up to date</span>
+                {/if}
+                <button
+                  onclick={updateSshx}
+                  disabled={sshxUpdating || !sshxStatus.update_available}
+                  class="px-3 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {sshxUpdating ? 'Deploying…' : sshxStatus.installed ? 'Update SSHX' : 'Install SSHX'}
+                </button>
+              </div>
+              {#if sshxStatus.available_hash}
+                <p class="text-xs text-gray-500 mt-2">
+                  Server ships <span class="font-mono">{sshxStatus.available_hash.slice(0, 12)}</span>
+                  — compared by hash, since an in-house rebuild need not change the version string.
+                </p>
+              {/if}
+            {:else}
+              <p class="text-sm text-gray-500">Build information unavailable — the instance must be running.</p>
+            {/if}
+          </div>
         </div>
       {/if}
 

@@ -330,6 +330,21 @@ export interface TailscaleStatusResult {
   daemon_active: boolean;
 }
 
+export interface SshxStatusResult {
+  /** The binary is present at /usr/local/bin/sshx. */
+  installed: boolean;
+  /** The sshx systemd unit is active. */
+  service_active: boolean;
+  /** What `sshx --version` prints in the instance. Display only: sshx is built in-house,
+   *  so two different builds can carry the same version string — the update check below
+   *  compares hashes instead. */
+  version?: string;
+  installed_hash?: string;
+  available_hash?: string;
+  /** Also true when the binary is missing entirely, where the redeploy is the repair. */
+  update_available: boolean;
+}
+
 export interface ProfileCheck {
   profile: string;
   server: string;

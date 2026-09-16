@@ -13,7 +13,7 @@ includes:
     - claude-code
     - docker
     - openvscode-server
-#    - sshx
+    - sshx
     - tailscale
 first_init_commands:
     - apt-get update -y
