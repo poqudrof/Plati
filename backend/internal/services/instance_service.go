@@ -1233,8 +1233,7 @@ func (s *InstanceService) GetSshxURL(id int64, actor auth.Actor) (*SshxURLResult
 	if err != nil {
 		return nil, fmt.Errorf("get incus client: %w", err)
 	}
-	cmd := `journalctl -u sshx.service -n 100 --no-pager -o cat 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | grep -oE 'https://sshx\.io/s/[^[:space:]]+' || true`
-	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", cmd})
+	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", sshxURLPipeline})
 	if err != nil {
 		log.Printf("sshx-url exec %s: %v", inst.IncusName, err)
 		return &SshxURLResult{}, nil

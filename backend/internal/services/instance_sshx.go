@@ -16,6 +16,17 @@ import (
 // redeploy both address it.
 const sshxBinaryPath = "/usr/local/bin/sshx"
 
+// sshxURLPipeline prints the session URL of the most recent sshx start, read from the
+// unit's journal. It takes the URL on the "Link:" line rather than matching a host: up to
+// 0.4.1 sessions lived on https://sshx.io, but the in-house 0.5.x build defaults to its
+// own server (https://jla-dev.burro-piranha.ts.net), and a hardcoded host silently
+// reported "waiting for session URL" forever. It always exits 0.
+const sshxURLPipeline = `journalctl -u sshx.service -n 100 --no-pager -o cat 2>/dev/null | ` + sshxLinkExtract
+
+// sshxLinkExtract is the parsing half of sshxURLPipeline, kept apart so a test can feed it
+// real journal output.
+const sshxLinkExtract = `sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | sed -n 's/.*Link:[[:space:]]*\(https:\/\/[^[:space:]]*\).*/\1/p' | tail -1`
+
 // SshxStatusResult compares the sshx binary running in an instance with the one the server
 // currently ships, so the UI can offer an update. sshx is built in-house here, so a new
 // build is published by replacing the file the mixin points at — nothing else.

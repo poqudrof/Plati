@@ -311,7 +311,7 @@ value, and `custom`, when present, replaces the whole list — the tab always se
 Built-in URLs are never stored: `GetLinks` (`services/instance_links.go`) reads them at
 request time in **one exec** — tailnet DNS name, whether anything serves 443 (a Tailscale
 Serve handler on 443, or a local `:443` listener), `systemctl is-active` for both units, and
-the last `https://sshx.io/s/…` in the sshx journal. It returns every link, pinned or not,
+the URL on the last `Link:` line of the sshx journal (`sshxURLPipeline` — no hardcoded host: 0.5.x sessions live on the in-house server, not sshx.io). It returns every link, pinned or not,
 with `url` empty and a `note` when it cannot be opened right now.
 
 - **hostname** is `https://{tailnet name}/` — the Tailscale name only, never the IP. The card

@@ -249,7 +249,7 @@ if command -v ss >/dev/null 2>&1; then
 else
   grep -qiE ':01BB [0-9A-F]+:0000 0A ' /proc/net/tcp /proc/net/tcp6 2>/dev/null && echo "listen443=1"
 fi
-echo "sshx_url=$(journalctl -u sshx.service -n 100 --no-pager -o cat 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | grep -oE 'https://sshx\.io/s/[^[:space:]]+' | tail -1)"
+echo "sshx_url=$(` + sshxURLPipeline + `)"
 exit 0`
 	out, err := client.RunCommand(inst.IncusName, []string{"/bin/sh", "-c", script})
 	if err != nil {
