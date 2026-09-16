@@ -13,7 +13,7 @@
   import DangerZone from '$lib/components/DangerZone.svelte';
   import { currentUser } from '$lib/stores/auth';
 
-  let instance: Instance | null = $state(null);
+  let instance = $state<Instance | null>(null);
   let template = $state<Template | null>(null);
   let server = $state<Server | null>(null);
   let incusDetail: IncusDetail | null = $state(null);
