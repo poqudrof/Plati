@@ -723,63 +723,63 @@
     <div class="bg-white rounded-lg border mt-6 overflow-hidden">
 
       <!-- Tab bar -->
-      <div class="flex border-b">
+      <div class="flex flex-wrap border-b">
         <button
           onclick={() => detailTab = 'status'}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'status' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Status</button>
         <button
           onclick={() => detailTab = 'storage'}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'storage' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Storage</button>
         <button
           onclick={() => detailTab = 'resources'}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'resources' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Resources</button>
         {#if isAdmin}
           <button
             onclick={() => detailTab = 'incus'}
-            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
               {detailTab === 'incus' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >Incus Detail</button>
         {/if}
         <button
           onclick={() => detailTab = 'secrets'}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'secrets' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Secrets</button>
         <button
           onclick={() => { detailTab = 'ssh-keys'; loadAuthorizedKeys(); }}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'ssh-keys' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >SSH Access</button>
         {#if hasSshx}
           <button
             onclick={() => { detailTab = 'sshx'; loadSshxStatus(); }}
-            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
               {detailTab === 'sshx' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >SSHX</button>
         {/if}
         {#if hasTailscale}
           <button
             onclick={() => detailTab = 'tailscale'}
-            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
               {detailTab === 'tailscale' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >Tailscale</button>
         {/if}
         {#if hasVSCode}
           <button
             onclick={() => detailTab = 'openvscode'}
-            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+            class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
               {detailTab === 'openvscode' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
           >OpenVSCode</button>
         {/if}
         <button
           onclick={() => detailTab = 'links'}
-          class="px-5 py-3 text-sm font-medium border-b-2 transition-colors
+          class="px-3 sm:px-5 py-2.5 sm:py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
             {detailTab === 'links' ? 'border-primary text-primary-dark' : 'border-transparent text-gray-500 hover:text-gray-800'}"
         >Links</button>
       </div>
