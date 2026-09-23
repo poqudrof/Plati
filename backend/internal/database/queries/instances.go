@@ -184,6 +184,23 @@ func InstanceIncusNameTaken(db *sqlx.DB, serverID, excludeID int64, incusName st
 	return n > 0, err
 }
 
+// TransferInstance hands an instance over to another account, name included.
+//
+// The name moves with the owner because both derived names — the tailnet hostname
+// (sanitizeName(name)) and incus_name (plati-{user_id}-{hostname}) — are unique per
+// account, and the target may already use this one; the caller resolves a free name
+// first (InstanceService.freeInstanceName).
+//
+// Like UpdateInstanceResources, and unlike UpdateInstanceName, this does not filter on
+// user_id: changing it is the point, and the route that reaches it is admin-gated.
+func TransferInstance(db *sqlx.DB, id, newUserID int64, name string) error {
+	_, err := db.Exec(
+		`UPDATE instances SET user_id = ?, name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		newUserID, name, id,
+	)
+	return err
+}
+
 // UpdateInstanceResources stores the admin-set CPU and memory limits of an instance. The
 // empty string clears an override, reverting that limit to the template's value.
 //

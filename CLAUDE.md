@@ -210,6 +210,19 @@ A running instance does not need a rebuild: the instance page's **SSH Access** t
 key immediately via `POST /instances/{id}/authorized-keys` (idempotent shell append, see
 `services/instance_authorized_keys.go`).
 
+**Whose keys that tab offers depends on the caller's role**, and the listing *is* the
+permission: `AddAuthorizedKey` resolves `key_id` against the very list `installableKeys`
+built for the same `auth.Actor`, so there is no second role check to keep in sync — a key
+that is not on your list comes back "not found".
+
+| Caller | Offered |
+|---|---|
+| The owner, or any non-admin | The owner's own keys, plus every server administrator's (so help can be asked for) |
+| An admin | Every account's keys — which is how one grants a colleague access to a workspace that is not theirs |
+
+Each entry carries `is_owner` / `is_admin` and the owner's name and email, which is what
+the tab groups on ("Other users" for an admin, "Server administrators" otherwise).
+
 ## Tailscale Key Modes
 
 Controlled per-user via `user_preferences.tailscale_mode`:
@@ -392,6 +405,7 @@ Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (
 | `PUT` | `/api/v1/admin/instances/{id}/resources` | Set `{"limits_cpu","limits_memory"}`; empty clears the override |
 | `GET` | `/api/v1/admin/instances` | Every user's instances, with `user_email` / `user_name` / `template_name` resolved |
 | `POST` | `/api/v1/admin/instances/{id}/duplicate` | Copy any instance and assign it to `{"user_id": N}` (omitted = source's owner) |
+| `POST` | `/api/v1/admin/instances/{id}/transfer` | Give any instance to `{"user_id": N}`: same container and volumes, new owner. `keep_container_name` / `keep_previous_keys` opt out of the two halves of the hand-over |
 
 `instances.create` body accepts optional `ssh_key_mode` and `tailscale_mode` fields to override user preferences per-instance.
 
@@ -481,6 +495,47 @@ intended hand-over, and `instance_duplicate_test.go` walks through it.
 
 Names: `freeInstanceName` picks `…-copy`, `…-copy-2`, … because `incus_name` is
 `plati-{user_id}-{name}` and `(incus_name, server_id)` is unique.
+
+## Transferring an Instance
+
+`POST /admin/instances/{id}/transfer` with `{"user_id": N}` hands the workspace **itself**
+to another account — same container, same volumes, same data, new owner. That is the other
+half of "an admin sets a machine up and then gives it to the user it is for"; `duplicate`
+leaves the original where it was, a transfer moves it.
+
+The button sits on the admin's own instance cards and in the dashboard's **All users**
+table (`TransferInstanceButton.svelte`).
+
+What moves, and why each piece has to move with it:
+
+| | |
+|---|---|
+| `user_id` | the row itself, through `queries.TransferInstance` — which, like `UpdateInstanceResources`, does **not** filter on `user_id`: changing it is the point |
+| `name` | only when the target account already uses it. Both derived names are unique *per account*, so `freeInstanceName` picks `…-2` and the response carries `previous_name` |
+| `incus_name` | renamed to `plati-{new owner}-{hostname}` through the same `renameContainer` as a rename, so a running instance is stopped and started again |
+| `authorized_keys` | the new owner's public keys in, the previous owner's out — on a running instance |
+| tailnet hostname | re-applied only when the name had to change (env var for the next rebuild + a live `tailscale set`) |
+
+`TransferOptions`' two flags are **keep_** flags on purpose: the Go zero value is the full
+hand-over, and keeping either has to be asked for.
+
+- `keep_container_name` skips the stop/start — at a price the result warns about: the
+  container stays `plati-{previous owner}-{name}`, and the previous owner **cannot reuse
+  that workspace name** (`Create` would derive the same `incus_name` and hit the
+  `(incus_name, server_id)` unique constraint).
+- `keep_previous_keys` leaves them SSH access. Without it, `keysToRevoke` drops every key
+  body of theirs the new owner does not also hold; the script rewrites `authorized_keys`
+  with `cat tmp > "$f"`, never `mv`, which would hand the terminal user's file to root and
+  lock them out of their own account.
+
+**A transfer cannot re-provision the container**, and says so in `warnings`: the previous
+owner's decrypted secrets and injected managed SSH key are still inside until a
+**rebuild**, which `Create`/`Rebuild` then resolve from the new owner. Everything past the
+DB write is best-effort — a stopped or unreachable instance still changes hands, and each
+gap comes back as a warning rather than an error.
+
+`TransferResult` embeds `*models.Instance` and therefore needs its own `MarshalJSON`, for
+the same reason `RenameResult` and `AdminInstance` do.
 
 ## Admin Access to Any Instance
 

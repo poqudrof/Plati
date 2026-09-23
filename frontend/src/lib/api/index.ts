@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, SshxStatusResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, SshxStatusResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, TransferResult, TransferOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
 
 // Setup
 export const setup = {
@@ -185,6 +185,11 @@ export const admin = {
     // Copies any user's instance; user_id is the account the copy is assigned to.
     duplicate: (id: number, user_id: number) =>
       api.post<Instance>(`/api/v1/admin/instances/${id}/duplicate`, { user_id }),
+    // Moves the instance itself to another account — same container, same volumes,
+    // new owner. Both opts default to off, i.e. the full hand-over: the container is
+    // renamed (stop/start) and the previous owner's SSH keys are removed.
+    transfer: (id: number, user_id: number, opts: TransferOptions = {}) =>
+      api.post<TransferResult>(`/api/v1/admin/instances/${id}/transfer`, { user_id, ...opts }),
     incusInfo: (id: number) => api.get<IncusDetail>(`/api/v1/admin/instances/${id}/incus-info`),
     updateResources: (id: number, res: ResourceUpdate) =>
       api.put<InstanceResources>(`/api/v1/admin/instances/${id}/resources`, res),

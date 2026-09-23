@@ -21,9 +21,13 @@ export interface InstanceAuthorizedKey {
   name: string;
   public_key: string;
   present: boolean;
-  /** Whose key this is — the instance owner, or a server administrator. */
+  /**
+   * Whose key this is: the instance owner (is_owner), a server administrator
+   * (is_admin), or — to an admin caller only — any other account.
+   */
   owner_name: string;
   owner_email?: string;
+  is_owner: boolean;
   is_admin: boolean;
 }
 
@@ -256,6 +260,32 @@ export interface RenameOptions {
   rename_container?: boolean;
   /** Rename the hostname inside Ubuntu — needs the instance running. */
   rename_system_hostname?: boolean;
+}
+
+/**
+ * Result of a hand-over: the instance under its new owner, plus how much of the
+ * transfer reached the container. `warnings` carries what it could not do by
+ * itself — above all that a rebuild is needed to provision the new owner's
+ * secrets and managed SSH key.
+ */
+export interface TransferResult extends Instance {
+  previous_user_id: number;
+  /** Set only when the name had to change to stay free in the target account. */
+  previous_name?: string;
+  new_owner_email: string;
+  container_renamed: boolean;
+  container_rename_error?: string;
+  restarted: boolean;
+  keys_installed: number;
+  keys_revoked: number;
+  warnings?: string[];
+}
+
+export interface TransferOptions {
+  /** Leave incus_name on the previous owner's prefix — skips the stop/start. */
+  keep_container_name?: boolean;
+  /** Leave the previous owner's public keys in authorized_keys. */
+  keep_previous_keys?: boolean;
 }
 
 export interface InstanceStats {

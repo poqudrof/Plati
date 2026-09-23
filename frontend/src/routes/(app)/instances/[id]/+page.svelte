@@ -209,11 +209,13 @@
     } finally { authorizedKeysLoading = false; }
   }
 
-  // The owner's own keys are listed first; server admins' keys are offered separately
-  // so granting an administrator access is a deliberate, clearly-labelled action.
-  let ownerKeys = $derived(authorizedKeys.filter(k => !k.is_admin));
-  let adminKeys = $derived(authorizedKeys.filter(k => k.is_admin));
-  let showAdminKeys = $state(false);
+  // The owner's own keys are listed first; everyone else's is offered separately, so
+  // granting somebody access is a deliberate, clearly-labelled action. What "everyone
+  // else" covers is the caller's role, resolved by the API: a server administrator for
+  // a regular user, every account for an admin.
+  let ownerKeys = $derived(authorizedKeys.filter(k => k.is_owner));
+  let otherKeys = $derived(authorizedKeys.filter(k => !k.is_owner));
+  let showOtherKeys = $state(false);
 
   async function installAuthorizedKey(key: InstanceAuthorizedKey) {
     installingKeyId = key.id;
@@ -1076,33 +1078,50 @@
               </div>
             {/if}
 
+            <!-- Everyone else's keys. An admin is offered every account's, so they can
+                 grant a colleague access to a workspace that is not theirs; a regular
+                 user only sees the server administrators'. The API decides, by role. -->
             <div class="border-t pt-4">
-              {#if !showAdminKeys}
+              {#if !showOtherKeys}
                 <button
-                  onclick={() => showAdminKeys = true}
+                  onclick={() => showOtherKeys = true}
                   class="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm"
                 >
                   Add another user's key
                 </button>
                 <p class="text-xs text-gray-400 mt-2">
-                  Grant a server administrator SSH access to this instance — useful when asking for help.
+                  {#if isAdmin}
+                    Grant any account — or a server administrator — SSH access to this instance.
+                  {:else}
+                    Grant a server administrator SSH access to this instance — useful when asking for help.
+                  {/if}
                 </p>
               {:else}
                 <div class="flex items-center justify-between mb-2">
-                  <h4 class="text-sm font-medium">Server administrators</h4>
-                  <button onclick={() => showAdminKeys = false} class="text-xs text-gray-400 hover:text-gray-600">Hide</button>
+                  <h4 class="text-sm font-medium">{isAdmin ? 'Other users' : 'Server administrators'}</h4>
+                  <button onclick={() => showOtherKeys = false} class="text-xs text-gray-400 hover:text-gray-600">Hide</button>
                 </div>
-                {#if adminKeys.length === 0}
-                  <p class="text-sm text-gray-500">No administrator has registered a public key.</p>
+                {#if otherKeys.length === 0}
+                  <p class="text-sm text-gray-500">
+                    {isAdmin
+                      ? 'Nobody else has registered a public key.'
+                      : 'No administrator has registered a public key.'}
+                  </p>
                 {:else}
                   <div class="space-y-2">
-                    {#each adminKeys as key}
+                    {#each otherKeys as key}
                       <div class="flex items-center gap-3 p-3 bg-gray-50 rounded border">
                         <div class="min-w-0 flex-1">
                           <p class="text-sm font-medium">
                             {key.owner_name || key.owner_email}
+                            {#if key.is_admin}
+                              <span class="text-xs font-normal text-gray-500 bg-gray-200 rounded px-1.5 py-0.5">admin</span>
+                            {/if}
                             <span class="text-xs font-normal text-gray-500">— {key.name}</span>
                           </p>
+                          {#if key.owner_email && key.owner_name}
+                            <p class="text-xs text-gray-400">{key.owner_email}</p>
+                          {/if}
                           <code class="block text-xs text-gray-500 font-mono truncate">{key.public_key}</code>
                         </div>
                         {#if key.present}

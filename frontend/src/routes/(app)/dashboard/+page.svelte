@@ -3,6 +3,7 @@
   import type { Instance, AdminInstance, User } from '$lib/api/types';
   import InstanceCard from '$lib/components/InstanceCard.svelte';
   import DuplicateInstanceButton from '$lib/components/DuplicateInstanceButton.svelte';
+  import TransferInstanceButton from '$lib/components/TransferInstanceButton.svelte';
   import InstanceLinks from '$lib/components/InstanceLinks.svelte';
   import { addNotification } from '$lib/stores/notifications';
   import { currentUser } from '$lib/stores/auth';
@@ -82,7 +83,7 @@
               <th class="px-4 py-3 font-semibold">Template</th>
               <th class="px-4 py-3 font-semibold">Status</th>
               <th class="px-4 py-3 font-semibold">Links</th>
-              <th class="px-4 py-3 font-semibold text-right">Duplicate</th>
+              <th class="px-4 py-3 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -111,11 +112,19 @@
                   <InstanceLinks instance={inst} compact />
                 </td>
                 <td class="px-4 py-3">
-                  <div class="flex justify-end">
+                  <!-- Duplicate leaves the original in place; Transfer moves this very
+                       workspace to another account, which is how an admin sets one up
+                       and then hands it to the user it is for. -->
+                  <div class="flex flex-col items-end gap-2">
                     <DuplicateInstanceButton
                       instanceId={inst.id}
                       {users}
                       defaultUserId={inst.user_id}
+                      onDone={load} />
+                    <TransferInstanceButton
+                      instanceId={inst.id}
+                      currentUserId={inst.user_id}
+                      {users}
                       onDone={load} />
                   </div>
                 </td>

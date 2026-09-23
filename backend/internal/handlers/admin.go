@@ -268,6 +268,35 @@ func (h *AdminHandler) DuplicateInstance(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, inst)
 }
 
+// TransferInstance hands any user's instance over to the account named in the body —
+// an admin's own included, which is what makes "set a workspace up, then give it to
+// the user it is for" a single step.
+//
+// The two keep_* flags come in flat next to user_id, hence the embedded options
+// struct: their zero values are the full hand-over.
+func (h *AdminHandler) TransferInstance(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+		services.TransferOptions
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	res, err := h.instanceSvc.TransferToUser(id, req.UserID, req.TransferOptions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (h *AdminHandler) CreateInstanceForUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		services.CreateInstanceRequest

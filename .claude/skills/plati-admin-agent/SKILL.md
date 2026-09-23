@@ -63,6 +63,8 @@ All under `$PLATI_BASE_URL/api/v1/admin/...` unless noted. JSON bodies throughou
 | `GET` | `/instances/{id}/debug-logs` | Creation/setup logs |
 | `POST` | `/instances/{id}/exec` | Run a command inside the instance: `{"command": [...]}` |
 | `POST` | `/instances/{id}/reapply-setup` | Re-run template setup commands |
+| `POST` | `/instances/{id}/duplicate` | Copy any instance: `{"user_id"?}` (omitted = source's owner) |
+| `POST` | `/instances/{id}/transfer` | Give the instance itself to another account: `{"user_id", "keep_container_name"?, "keep_previous_keys"?}`. Same container and volumes, new owner; the container is renamed (stop/start) and the previous owner's SSH keys removed unless the `keep_*` flags say otherwise. Tell the user to **rebuild** afterwards — the previous owner's secrets and managed key are still inside until then |
 
 Lifecycle actions (`start`/`stop`/`rebuild`/`delete`) live under the non-admin `/api/v1/instances/{id}/...` paths but an admin key can call them on **any** instance id (ownership checks are bypassed for admin role) — see the user skill for the exact list.
 

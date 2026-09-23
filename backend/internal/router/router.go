@@ -208,6 +208,7 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/instances", deps.AdminHandler.ListAllInstances)
 				r.Post("/instances", deps.AdminHandler.CreateInstanceForUser)
 				r.Post("/instances/{id}/duplicate", deps.AdminHandler.DuplicateInstance)
+				r.Post("/instances/{id}/transfer", deps.AdminHandler.TransferInstance)
 				r.Get("/instances/{id}/incus-info", deps.InstanceHandler.IncusDetail)
 				r.Put("/instances/{id}/incus-config", deps.InstanceHandler.UpdateIncusConfig)
 				r.Put("/instances/{id}/resources", deps.InstanceHandler.UpdateResources)

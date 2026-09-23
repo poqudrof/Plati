@@ -5,11 +5,12 @@
   import { addNotification } from '$lib/stores/notifications';
   import { goto } from '$app/navigation';
   import DuplicateInstanceButton from './DuplicateInstanceButton.svelte';
+  import TransferInstanceButton from './TransferInstanceButton.svelte';
   import InstanceLinks from './InstanceLinks.svelte';
 
   let { instance, users = [], onRefresh = () => {} }: {
     instance: Instance;
-    /** Admin only: accounts a duplicate can be assigned to. */
+    /** Admin only: accounts a duplicate or a transfer can be assigned to. */
     users?: User[];
     onRefresh?: () => void;
   } = $props();
@@ -104,7 +105,7 @@
   {/if}
 
   <!-- Primary actions -->
-  <div class="flex gap-2">
+  <div class="flex flex-wrap items-start gap-2">
     {#if instance.status === 'stopped'}
       <button
         onclick={() => action(() => instances.start(instance.id), 'Instance started')}
@@ -119,6 +120,16 @@
       defaultUserId={instance.user_id}
       disabled={loading}
       onDone={onRefresh} />
+    <!-- Admins only: hand this very workspace over, which is how one sets a machine
+         up in their own account and then gives it to the user it is for. -->
+    {#if users.length > 0}
+      <TransferInstanceButton
+        instanceId={instance.id}
+        currentUserId={instance.user_id}
+        {users}
+        disabled={loading}
+        onDone={onRefresh} />
+    {/if}
   </div>
 
   <!-- Instance management: stop / rebuild / delete with descriptions -->

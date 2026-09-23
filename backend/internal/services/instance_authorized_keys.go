@@ -12,17 +12,19 @@ import (
 	"github.com/homaserver/plati/internal/models"
 )
 
-// InstanceAuthorizedKey is one of the instance owner's registered public keys,
-// flagged with whether it is already present in the instance's authorized_keys.
+// InstanceAuthorizedKey is one registered public key a caller may install on an
+// instance, flagged with whose it is and whether it is already in authorized_keys.
 type InstanceAuthorizedKey struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	PublicKey string `json:"public_key"`
 	Present   bool   `json:"present"`
-	// Owner identifies whose key this is. Admin keys are offered alongside the
-	// instance owner's so a server administrator can be granted access on request.
+	// Owner identifies whose key this is: the instance owner's own keys (IsOwner),
+	// every server administrator's — offered to anyone, so help can be asked for —
+	// and, to an admin caller, every other account's as well.
 	OwnerName  string `json:"owner_name"`
 	OwnerEmail string `json:"owner_email,omitempty"`
+	IsOwner    bool   `json:"is_owner"`
 	IsAdmin    bool   `json:"is_admin"`
 }
 
@@ -49,10 +51,17 @@ func keyBody(publicKey string) string {
 	return fields[0] + " " + fields[1]
 }
 
-// installableKeys returns every key the instance owner may install: their own, plus
-// those of any server administrator. Admin keys are listed last and never duplicate an
-// owner key (an admin looking at their own instance sees each key once).
-func (s *InstanceService) installableKeys(inst *models.Instance) ([]InstanceAuthorizedKey, error) {
+// installableKeys returns every key the caller may install on this instance. The
+// instance owner's own keys come first, then:
+//
+//   - for anyone: the keys of every server administrator, so help can be asked for;
+//   - for an admin caller: every other account's keys too, which is how an
+//     administrator grants a colleague access to a workspace that is not theirs —
+//     a hand-over in the making, or two people on one machine.
+//
+// A key is listed once: the owner's entry wins over the same key seen again below,
+// so an admin looking at their own instance sees each of their keys once.
+func (s *InstanceService) installableKeys(inst *models.Instance, actor auth.Actor) ([]InstanceAuthorizedKey, error) {
 	ownerKeys, err := queries.ListSSHKeys(s.db, inst.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("list public keys: %w", err)
@@ -68,35 +77,42 @@ func (s *InstanceService) installableKeys(inst *models.Instance) ([]InstanceAuth
 		seen[k.ID] = true
 		out = append(out, InstanceAuthorizedKey{
 			ID: k.ID, Name: k.Name, PublicKey: k.PublicKey, OwnerName: ownerName,
+			IsOwner: true,
 		})
 	}
 
-	adminKeys, err := queries.ListAdminSSHKeys(s.db)
+	// An admin sees the whole platform's keys; everyone else only the administrators'.
+	others, err := queries.ListAdminSSHKeys(s.db)
+	if actor.Admin {
+		others, err = queries.ListAllSSHKeysWithOwner(s.db)
+	}
 	if err != nil {
-		log.Printf("warning: list admin public keys: %v", err)
+		log.Printf("warning: list other users' public keys: %v", err)
 		return out, nil
 	}
-	for _, k := range adminKeys {
+	for _, k := range others {
 		if seen[k.ID] {
 			continue
 		}
+		seen[k.ID] = true
 		out = append(out, InstanceAuthorizedKey{
 			ID: k.ID, Name: k.Name, PublicKey: k.PublicKey,
-			OwnerName: k.UserName, OwnerEmail: k.UserEmail, IsAdmin: true,
+			OwnerName: k.UserName, OwnerEmail: k.UserEmail,
+			IsAdmin: k.UserRole == "admin",
 		})
 	}
 	return out, nil
 }
 
-// ListAuthorizedKeys returns the keys installable on this instance — the owner's, plus
-// every server administrator's — and whether each one is already in authorized_keys.
-// Presence is only checked while the instance is running.
+// ListAuthorizedKeys returns the keys installable on this instance — see
+// installableKeys for whose, which depends on the caller's role — and whether each one
+// is already in authorized_keys. Presence is only checked while the instance is running.
 func (s *InstanceService) ListAuthorizedKeys(instanceID int64, actor auth.Actor) ([]InstanceAuthorizedKey, error) {
 	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
 	if err != nil {
 		return nil, fmt.Errorf("instance not found: %w", err)
 	}
-	keys, err := s.installableKeys(inst)
+	keys, err := s.installableKeys(inst, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +131,14 @@ func (s *InstanceService) ListAuthorizedKeys(instanceID int64, actor auth.Actor)
 	return keys, nil
 }
 
-// AddAuthorizedKey appends one of the installable public keys — the owner's or a server
-// administrator's — to the running instance's authorized_keys (root, plus the template's
-// terminal user when it exists).
+// AddAuthorizedKey appends one of the installable public keys to the running instance's
+// authorized_keys (root, plus the template's terminal user when it exists).
+//
+// Which keys those are comes from installableKeys with the same actor, so the role check
+// is the listing itself: a regular user can only install the owner's or an
+// administrator's key, while an admin can install any account's. A key that is not on
+// the caller's list is simply not found.
+//
 // The write is idempotent: a key already present is left untouched.
 func (s *InstanceService) AddAuthorizedKey(instanceID int64, actor auth.Actor, keyID int64) error {
 	inst, err := queries.GetInstanceForActor(s.db, instanceID, actor)
@@ -128,7 +149,7 @@ func (s *InstanceService) AddAuthorizedKey(instanceID int64, actor auth.Actor, k
 		return fmt.Errorf("instance is not running")
 	}
 
-	keys, err := s.installableKeys(inst)
+	keys, err := s.installableKeys(inst, actor)
 	if err != nil {
 		return err
 	}
@@ -140,7 +161,7 @@ func (s *InstanceService) AddAuthorizedKey(instanceID int64, actor auth.Actor, k
 		}
 	}
 	if publicKey == "" {
-		return fmt.Errorf("public key not found for this instance's owner or a server administrator")
+		return fmt.Errorf("public key not found among the ones you may install on this instance")
 	}
 
 	client, err := s.clientForInstance(inst)
