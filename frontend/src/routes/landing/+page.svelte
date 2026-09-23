@@ -138,6 +138,7 @@
 
         <!-- Desktop links -->
         <div class="hidden md:flex items-center gap-8">
+          <a href="#fonctionnalites" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Fonctionnalites</a>
           <a href="#vibe-coders" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Vibe coders</a>
           <a href="#developpeurs" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Developpeurs</a>
           <a href="#entreprises" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Entreprises</a>
@@ -160,6 +161,7 @@
     <!-- Mobile menu -->
     {#if mobileMenuOpen}
     <div class="bg-white border-t border-gray-100 px-6 py-4 flex flex-col gap-3">
+      <a href="#fonctionnalites" onclick={closeMenu} class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Fonctionnalites</a>
       <a href="#vibe-coders" onclick={closeMenu} class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Vibe coders</a>
       <a href="#developpeurs" onclick={closeMenu} class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Developpeurs</a>
       <a href="#entreprises" onclick={closeMenu} class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Entreprises</a>
@@ -301,8 +303,78 @@
     </div>
   </section>
 
+  <!-- ======================== FONCTIONNALITES CLES ======================== -->
+  <section id="fonctionnalites" class="py-20 bg-white" style="border-top:1px solid #F3F4F6;">
+    <div class="max-w-6xl mx-auto px-6">
+
+      <div class="reveal text-center mb-14">
+        <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 mb-4"
+             style="background:#f0faf5; border-color:#b7e0d0;">
+          <span class="text-xs font-semibold" style="color:#2D7A5F;">Fonctionnalites cles</span>
+        </div>
+        <h2 class="font-extrabold tracking-tight text-gray-900 mb-3"
+            style="font-size:clamp(1.75rem,3.5vw,2.5rem); letter-spacing:-0.02em;">
+          Tout ce qu'il faut, rien de superflu
+        </h2>
+        <p class="text-gray-500 mx-auto" style="font-size:1.0625rem; max-width:600px; line-height:1.65;">
+          De la creation d'environnement a la gestion des acces, Plati couvre
+          le cycle de vie complet de vos VMs de dev.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <div class="card reveal reveal-d1 p-8">
+          <div class="w-12 h-12 flex items-center justify-center rounded-lg mb-5" style="background:#f0faf5;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Environnements prets en un clic</h3>
+          <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
+            Choisissez un template, Plati provisionne une VM Incus isolee : repo clone,
+            outils installes, cles SSH injectees, ressources configurees. Reproductible a l'infini.
+          </p>
+        </div>
+
+        <div class="card reveal reveal-d2 p-8">
+          <div class="w-12 h-12 flex items-center justify-center rounded-lg mb-5" style="background:#f0faf5;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <circle cx="10" cy="15" r="2"/>
+              <path d="M12 13.5V17"/>
+            </svg>
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Fichiers et snapshots integres</h3>
+          <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
+            Parcourez, telechargez et snapshotez vos volumes persistants directement
+            depuis l'interface web : navigateur de fichiers, export en un clic,
+            restauration de snapshot sans jamais ouvrir un terminal SSH.
+          </p>
+        </div>
+
+        <div class="card reveal reveal-d3 p-8">
+          <div class="w-12 h-12 flex items-center justify-center rounded-lg mb-5" style="background:#f0faf5;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Acces et identites maitrises</h3>
+          <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
+            SSO Entra ID ou cles API pour l'automatisation, et un choix par utilisateur
+            entre cle SSH/Tailscale geree par l'admin ou cles personnelles — bascule
+            possible instance par instance. Self-service, sans perdre le controle.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
   <!-- ======================== SECTION 1: VIBE CODERS ======================== -->
-  <section id="vibe-coders" class="py-20 bg-white" style="border-top:1px solid #F3F4F6;">
+  <section id="vibe-coders" class="py-20" style="background:#FAFAFA; border-top:1px solid #F3F4F6;">
     <div class="max-w-6xl mx-auto px-6">
 
       <div class="reveal text-center mb-14">
@@ -374,7 +446,7 @@
   </section>
 
   <!-- ======================== SECTION 2: DEVELOPPEURS ======================== -->
-  <section id="developpeurs" class="py-20" style="background:#FAFAFA; border-top:1px solid #F3F4F6;">
+  <section id="developpeurs" class="py-20 bg-white" style="border-top:1px solid #F3F4F6;">
     <div class="max-w-6xl mx-auto px-6">
 
       <div class="reveal text-center mb-14">
@@ -474,7 +546,7 @@
   </section>
 
   <!-- ======================== SECTION 3: ENTREPRISES ======================== -->
-  <section id="entreprises" class="py-20 bg-white" style="border-top:1px solid #F3F4F6;">
+  <section id="entreprises" class="py-20" style="background:#FAFAFA; border-top:1px solid #F3F4F6;">
     <div class="max-w-6xl mx-auto px-6">
 
       <div class="reveal text-center mb-14">
