@@ -3,7 +3,7 @@
   "private": true,
   "description": "Landing page statique de Plati, publiee sur GitHub Pages",
   "scripts": {
-    "build": "mkdir -p dist && tailwindcss -i src/input.css -o dist/styles.css --minify && cp index.html dist/",
+    "build": "mkdir -p dist && tailwindcss -i src/input.css -o dist/styles.css --minify && cp index.html dist/ && mkdir -p dist/fr && cp fr/index.html dist/fr/",
     "dev": "tailwindcss -i src/input.css -o styles.css --watch"
   },
   "devDependencies": {

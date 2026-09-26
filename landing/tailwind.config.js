@@ -2,7 +2,7 @@
 // Reprend à l'identique la config qui était inline dans index.html,
 // du temps où la page chargeait cdn.tailwindcss.com.
 module.exports = {
-  content: ['./index.html'],
+  content: ['./index.html', './fr/index.html'],
   theme: {
     extend: {
       colors: {
