@@ -650,13 +650,32 @@ func (s *TemplateService) SyncFromDir(dir string) error {
 		}
 	}
 
-	// Delete DB templates that no longer have a YAML file on disk.
+	// Delete DB templates that no longer have a YAML file on disk. A template that
+	// instances were built from cannot be deleted (instances.template_id is a
+	// foreign key, and Rebuild reads it), so it is deactivated instead: hidden from
+	// the create list, still there for its instances. Restoring the YAML reactivates it.
 	allTemplates, err := queries.ListTemplates(s.db, false)
 	if err != nil {
 		return fmt.Errorf("list templates for cleanup: %w", err)
 	}
 	for _, t := range allTemplates {
 		if !yamlSlugs[t.Slug] {
+			n, err := queries.CountInstancesForTemplate(s.db, t.ID)
+			if err != nil {
+				log.Printf("warning: count instances of template %s: %v", t.Slug, err)
+				continue
+			}
+			if n > 0 {
+				if !t.IsActive {
+					continue
+				}
+				if err := queries.DeactivateTemplate(s.db, t.ID); err != nil {
+					log.Printf("warning: deactivate stale template %s: %v", t.Slug, err)
+				} else {
+					log.Printf("synced template: %s (deactivated, no YAML on disk, %d instance(s) still use it)", t.Slug, n)
+				}
+				continue
+			}
 			if err := queries.DeleteTemplate(s.db, t.ID); err != nil {
 				log.Printf("warning: delete stale template %s: %v", t.Slug, err)
 			} else {

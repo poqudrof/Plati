@@ -69,6 +69,19 @@ func DeleteTemplate(db *sqlx.DB, id int64) error {
 	return err
 }
 
+// CountInstancesForTemplate returns how many instances were built from the template.
+func CountInstancesForTemplate(db *sqlx.DB, id int64) (int, error) {
+	var n int
+	err := db.Get(&n, "SELECT COUNT(*) FROM instances WHERE template_id = ?", id)
+	return n, err
+}
+
+// DeactivateTemplate hides a template from the create list without deleting it.
+func DeactivateTemplate(db *sqlx.DB, id int64) error {
+	_, err := db.Exec("UPDATE templates SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
+	return err
+}
+
 func GetLatestDebugInstanceForTemplate(db *sqlx.DB, templateID, userID int64) (*models.Instance, error) {
 	var inst models.Instance
 	err := db.Get(&inst,

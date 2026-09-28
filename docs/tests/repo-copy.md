@@ -3,6 +3,9 @@
 **Goal:** Verify that files from `config/repos/` are correctly bind-mounted and copied to each
 repo's `dest` when an instance is created with a template that uses `repos:`.
 
+> `site-ia-gen` now lives in `config/templates/archive/` and is no longer synced. To run the
+> shell steps below, copy it back into `config/templates/` for the duration of the test.
+
 **Background:** `attachReposDirAndBuildCmds` binds the host `reposDir` into the instance at `/plati-repos`,
 then prepends `cp` commands to `firstInitCmds`. It looks up each repo by name in the `git_repos` DB table;
 if the record is missing or not `ready`, it falls back to checking the filesystem directly (as of the fix

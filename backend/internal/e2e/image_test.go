@@ -102,10 +102,21 @@ func repoRoot() string {
 	return filepath.Join(filepath.Dir(file), "..", "..", "..")
 }
 
-// loadTemplate reads and parses a YAML template from config/templates/<slug>.yaml.
+// templatePath resolves config/templates/<slug>.yaml, falling back to
+// config/templates/archive/ — archived templates (the project-specific ones) are no
+// longer offered, but they still exercise the repos / rebuild_commands machinery.
+func templatePath(slug string) string {
+	path := filepath.Join(repoRoot(), "config", "templates", slug+".yaml")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return filepath.Join(repoRoot(), "config", "templates", "archive", slug+".yaml")
+}
+
+// loadTemplate reads and parses a YAML template (see templatePath).
 func loadTemplate(t *testing.T, slug string) templateYAML {
 	t.Helper()
-	path := filepath.Join(repoRoot(), "config", "templates", slug+".yaml")
+	path := templatePath(slug)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read template %s: %v", path, err)
@@ -120,7 +131,7 @@ func loadTemplate(t *testing.T, slug string) templateYAML {
 // loadFullTemplate reads and parses the complete YAML for a template slug.
 func loadFullTemplate(t *testing.T, slug string) fullTemplateYAML {
 	t.Helper()
-	path := filepath.Join(repoRoot(), "config", "templates", slug+".yaml")
+	path := templatePath(slug)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read template %s: %v", path, err)

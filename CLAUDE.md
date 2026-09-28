@@ -278,6 +278,18 @@ repos, dotfiles and tool caches live, so a rebuild keeps them. A template withou
 (or `/root` when the template declares no `terminal_user`), sized from `resources.disk`
 (`defaultPersistenceDirs` in `services/instance_service.go`).
 
+### Archived templates
+
+`config/templates/archive/` is not synced (`SyncFromDir` globs the top level only). The
+project-specific templates (`qcm-poc-formation`, `site-ia-gen`, `site-sch` — ones that clone
+a repo) live there: Plati machines are dev boxes, and a working setup is reproduced by
+**copying an instance**, not by writing a template for it.
+
+Removing a YAML deletes its DB row, except when instances were built from it
+(`instances.template_id` is a foreign key, and `Rebuild` reads the template): that row is
+**deactivated** instead — hidden from the create list, kept for its instances. Moving the
+YAML back reactivates it.
+
 ## Auto-Stop (Sleep)
 
 Incus stops nothing on its own — there is no idle timeout in Incus. Every automatic stop
