@@ -1,20 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plati — AI agents for your whole team, under control</title>
-  <meta name="description" content="Plati opens Claude Code, Codex CLI or OpenCode in secure micro-VMs on your own servers. Everyone can contribute to projects with AI; administrators control access, keys and Git rights.">
+  <title>Plati — L'IA pour toute l'équipe, sous contrôle</title>
+  <meta name="description" content="Plati ouvre Claude Code, Codex CLI ou OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs. Tout le monde contribue aux projets avec l'IA ; les administrateurs gèrent les accès, les clés et les droits Git.">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="alternate" hreflang="en" href="./">
-  <link rel="alternate" hreflang="fr" href="fr/">
+  <link rel="alternate" hreflang="en" href="../">
+  <link rel="alternate" hreflang="fr" href="./">
 
   <!-- Tailwind compilé par `npm run build` (voir tailwind.config.js). -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../styles.css">
 
   <style>
     html { scroll-behavior: smooth; }
@@ -114,22 +114,25 @@
 
         <!-- Desktop links -->
         <div id="nav-links" class="hidden md:flex items-center gap-8">
-          <a href="#features" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Features</a>
-          <a href="#how-it-works" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">How it works</a>
-          <a href="#benefits" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Benefits</a>
+          <a href="#features" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Fonctionnalités</a>
+          <a href="#how-it-works" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Comment ça marche</a>
+          <a href="#benefits" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Bénéfices</a>
         </div>
 
         <!-- CTA + hamburger -->
         <div class="flex items-center gap-3">
-          <a href="fr/" hreflang="fr" lang="fr" class="lang-switch" title="Version française" aria-label="Version française">
-            <svg width="21" height="14" viewBox="0 0 3 2" aria-hidden="true">
-              <rect width="1" height="2" fill="#002395"/>
-              <rect x="1" width="1" height="2" fill="#fff"/>
-              <rect x="2" width="1" height="2" fill="#ED2939"/>
+          <a href="../" hreflang="en" lang="en" class="lang-switch" title="English version" aria-label="English version">
+            <svg width="21" height="14" viewBox="0 0 60 30" preserveAspectRatio="none" aria-hidden="true">
+              <clipPath id="uk-clip"><path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z"/></clipPath>
+              <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
+              <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
+              <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk-clip)" stroke="#C8102E" stroke-width="4"/>
+              <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
+              <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" stroke-width="6"/>
             </svg>
-            FR
+            EN
           </a>
-          <a href="https://github.com/poqudrof/Plati" class="btn-primary hidden md:inline-flex text-sm py-2 px-4">Try it</a>
+          <a href="https://github.com/poqudrof/Plati" class="btn-primary hidden md:inline-flex text-sm py-2 px-4">Essayer</a>
           <button id="burger" onclick="toggleMenu()" class="md:hidden p-1 border-0 bg-transparent cursor-pointer">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#374151" stroke-width="2" stroke-linecap="round">
               <line x1="3" y1="6" x2="21" y2="6"/>
@@ -143,10 +146,10 @@
 
     <!-- Mobile menu -->
     <div id="mobile-menu" class="hidden bg-white border-t border-gray-100 px-6 py-4 flex-col gap-3">
-      <a href="#features" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Features</a>
-      <a href="#how-it-works" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">How it works</a>
-      <a href="#benefits" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Benefits</a>
-      <a href="https://github.com/poqudrof/Plati" onclick="closeMenu()" class="btn-primary mt-2 justify-center">Get started</a>
+      <a href="#features" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Fonctionnalités</a>
+      <a href="#how-it-works" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Comment ça marche</a>
+      <a href="#benefits" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Bénéfices</a>
+      <a href="https://github.com/poqudrof/Plati" onclick="closeMenu()" class="btn-primary mt-2 justify-center">Démarrer</a>
     </div>
   </nav>
 
@@ -161,28 +164,28 @@
           <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 mb-6"
                style="background:#f0faf5; border-color:#b7e0d0;">
             <div class="w-1.5 h-1.5 rounded-full" style="background:#2D7A5F;"></div>
-            <span class="text-xs font-semibold" style="color:#2D7A5F;">Open source — Self-hosted</span>
+            <span class="text-xs font-semibold" style="color:#2D7A5F;">Open source — Auto-hébergé</span>
           </div>
 
           <h1 class="font-extrabold leading-none tracking-tight text-gray-900 mb-5"
               style="font-size:clamp(2.25rem,5vw,3.75rem); letter-spacing:-0.03em; line-height:1.08;">
-            Your whole team<br>
-            builds with AI.<br>
-            <span style="color:#2D7A5F;">Your admins keep control.</span>
+            Toute votre équipe<br>
+            construit avec l'IA.<br>
+            <span style="color:#2D7A5F;">Vos admins gardent le contrôle.</span>
           </h1>
 
           <p class="text-gray-500 mb-8 leading-relaxed"
              style="font-size:clamp(1rem,2vw,1.125rem); max-width:520px; line-height:1.7;">
-            Plati opens Claude Code, Codex CLI or OpenCode in secure micro-VMs, on your own servers.
-            Administrators decide who gets in, which repositories they reach, and with which keys and secrets.
+            Plati ouvre Claude Code, Codex CLI ou OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs.
+            Les administrateurs décident qui y accède, à quels dépôts, avec quelles clés et quels secrets.
           </p>
 
           <div class="flex flex-wrap gap-3 mb-8">
             <a href="https://github.com/poqudrof/Plati" class="btn-primary" style="font-size:1rem; padding:0.875rem 1.75rem;">
-              Get started
+              Démarrer
             </a>
             <a href="https://github.com/poqudrof/Plati" class="btn-outline" style="font-size:1rem; padding:0.875rem 1.75rem;">
-              View on GitHub
+              Voir sur GitHub
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round">
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -201,12 +204,12 @@
             <span class="flex items-center gap-1.5 text-sm text-gray-400">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5"
                    stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Runs on your Incus servers
+              Sur vos serveurs Incus
             </span>
             <span class="flex items-center gap-1.5 text-sm text-gray-400">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5"
                    stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Private by default (Tailscale)
+              Privé par défaut (Tailscale)
             </span>
           </div>
         </div>
@@ -236,8 +239,8 @@
               <div style="color:#a6e3a1;">✓ &nbsp;<span style="color:#cdd6f4;">SSH keys &amp; Git access installed</span> <span style="color:#6b7280;">(2s)</span></div>
               <div style="color:#a6e3a1;">✓ &nbsp;<span style="color:#cdd6f4;">Claude Code · Codex · OpenCode ready</span> <span style="color:#6b7280;">(6s)</span></div>
               <div style="color:#a6e3a1;">✓ &nbsp;<span style="color:#cdd6f4;">Joined your tailnet</span> <span style="color:#6b7280;">(3s)</span></div>
-              <div style="margin-top:0.75rem; color:#89b4fa;">→ &nbsp;<span style="text-decoration:underline;">https://site-web.your-tailnet.ts.net</span></div>
-              <div style="color:#a6e3a1; font-weight:600;">✓ &nbsp;Ready — visible to your team only</div>
+              <div style="margin-top:0.75rem; color:#89b4fa;">→ &nbsp;<span style="text-decoration:underline;">https://site-web.votre-tailnet.ts.net</span></div>
+              <div style="color:#a6e3a1; font-weight:600;">✓ &nbsp;Prête — visible par votre équipe uniquement</div>
               <div style="margin-top:0.5rem;">
                 <span style="color:#6b7280;">$</span>
                 <span class="blink" style="color:#cdd6f4;"> ▋</span>
@@ -249,7 +252,7 @@
           <div class="absolute -bottom-4 -right-2 flex items-center gap-2 bg-white rounded-lg px-3 py-2.5"
                style="border:1px solid #E5E7EB; box-shadow:0 4px 14px rgba(0,0,0,0.07);">
             <div class="w-2 h-2 rounded-full" style="background:#22c55e; flex-shrink:0;"></div>
-            <span class="text-sm font-semibold text-gray-900">Private to your VPN</span>
+            <span class="text-sm font-semibold text-gray-900">Privée, sur votre VPN</span>
           </div>
         </div>
 
@@ -264,10 +267,10 @@
       <div class="reveal text-center mb-14">
         <h2 class="font-extrabold tracking-tight text-gray-900 mb-3"
             style="font-size:clamp(1.75rem,3.5vw,2.5rem); letter-spacing:-0.02em;">
-          AI for everyone, <span style="color:#2D7A5F;">security for the company</span>
+          L'IA pour tous, <span style="color:#2D7A5F;">la sécurité pour l'entreprise</span>
         </h2>
         <p class="text-gray-500 mx-auto" style="font-size:1.0625rem; max-width:520px; line-height:1.65;">
-          Everyone can contribute to projects. Nobody gets more access than they need.
+          Chacun peut contribuer aux projets. Personne n'a plus d'accès que nécessaire.
         </p>
       </div>
 
@@ -281,10 +284,10 @@
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
             </svg>
           </div>
-          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#2D7A5F;">Ready in a few clicks</div>
-          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">One micro-VM per person, per project</h3>
+          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#2D7A5F;">Prête en quelques clics</div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Une micro-VM par personne et par projet</h3>
           <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-            Administrators create, clone and hand over Incus micro-VMs in a few clicks. Each one keeps its workspace across rebuilds and joins your VPN.
+            Les administrateurs créent, clonent et confient des micro-VMs Incus en quelques clics. Chacune garde son espace de travail d'une reconstruction à l'autre et rejoint votre VPN.
           </p>
         </div>
 
@@ -300,10 +303,10 @@
               <line x1="16" x2="16" y1="16" y2="16"/>
             </svg>
           </div>
-          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#D97706;">AI agents</div>
-          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Claude Code, Codex, OpenCode — ready to go</h3>
+          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#D97706;">Agents IA</div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Claude Code, Codex, OpenCode — prêts à l'emploi</h3>
           <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-            Each micro-VM ships with the agent and the skills your team needs. Evolve the website, add a feature to the web app, use a dedicated AI tool — and leave the agent working in the background.
+            Chaque micro-VM arrive avec l'agent et les skills dont votre équipe a besoin. Faites évoluer le site web, ajoutez une feature à la web app, utilisez un outil IA dédié — et laissez l'agent travailler en tâche de fond.
           </p>
         </div>
 
@@ -316,10 +319,10 @@
               <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
           </div>
-          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#2D7A5F;">Under control</div>
-          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Your data, your rules</h3>
+          <div class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#2D7A5F;">Sous contrôle</div>
+          <h3 class="text-lg font-bold text-gray-900 mb-3" style="letter-spacing:-0.01em;">Vos données, vos règles</h3>
           <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-            Administrators install SSH keys, grant Git access by skill level and keep secrets encrypted. Everything runs on your servers, inside your VPN — nothing exposed to the internet.
+            Les administrateurs installent les clés SSH, attribuent les accès Git selon le niveau de chacun et chiffrent les secrets. Tout tourne sur vos serveurs, dans votre VPN — rien n'est exposé sur Internet.
           </p>
         </div>
 
@@ -334,10 +337,10 @@
       <div class="reveal text-center mb-14">
         <h2 class="font-extrabold tracking-tight text-gray-900 mb-3"
             style="font-size:clamp(1.75rem,3.5vw,2.5rem); letter-spacing:-0.02em;">
-          How it works
+          Comment ça marche
         </h2>
         <p class="text-gray-500" style="font-size:1.0625rem; line-height:1.65;">
-          From the administrator’s template to a demo for your colleagues.
+          Du template de l'administrateur à la démo pour vos collègues.
         </p>
       </div>
 
@@ -352,9 +355,9 @@
             <div class="step-line"></div>
           </div>
           <div class="pb-8 pt-2">
-            <h3 class="text-base font-bold text-gray-900 mb-1">The admin prepares a template</h3>
+            <h3 class="text-base font-bold text-gray-900 mb-1">L'administrateur prépare un template</h3>
             <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-              Repositories, tools, AI agent and skills: described once in YAML, reused by everyone.
+              Dépôts, outils, agent IA et skills : décrits une fois en YAML, réutilisés par tous.
             </p>
           </div>
         </div>
@@ -367,9 +370,9 @@
             <div class="step-line"></div>
           </div>
           <div class="pb-8 pt-2">
-            <h3 class="text-base font-bold text-gray-900 mb-1">Access is granted</h3>
+            <h3 class="text-base font-bold text-gray-900 mb-1">Les accès sont attribués</h3>
             <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-              SSH keys installed, Git rights set according to each person’s level, secrets encrypted. Nobody gets more than they need.
+              Clés SSH installées, droits Git selon le niveau de chacun, secrets chiffrés. Personne n'a plus que nécessaire.
             </p>
           </div>
         </div>
@@ -382,9 +385,9 @@
             <div class="step-line"></div>
           </div>
           <div class="pb-8 pt-2">
-            <h3 class="text-base font-bold text-gray-900 mb-1">Everyone gets a micro-VM</h3>
+            <h3 class="text-base font-bold text-gray-900 mb-1">Chacun reçoit sa micro-VM</h3>
             <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-              Created or cloned in a few clicks, with a persistent workspace that survives rebuilds.
+              Créée ou clonée en quelques clics, avec un espace de travail persistant qui survit aux reconstructions.
             </p>
           </div>
         </div>
@@ -397,9 +400,9 @@
             <div class="step-line"></div>
           </div>
           <div class="pb-8 pt-2">
-            <h3 class="text-base font-bold text-gray-900 mb-1">Work with the agent, from anywhere</h3>
+            <h3 class="text-base font-bold text-gray-900 mb-1">Travaillez avec l'agent, de partout</h3>
             <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-              Drive Claude Code remotely from your laptop or your phone — on your machines, not a vendor’s cloud. The agent keeps working in the background.
+              Pilotez Claude Code à distance depuis votre portable ou votre téléphone — sur vos machines, pas dans le cloud d'un fournisseur. L'agent continue en tâche de fond.
             </p>
           </div>
         </div>
@@ -411,9 +414,9 @@
                  style="background:#D97706;">5</div>
           </div>
           <div class="pt-2">
-            <h3 class="text-base font-bold text-gray-900 mb-1">Show your progress</h3>
+            <h3 class="text-base font-bold text-gray-900 mb-1">Montrez l'avancée</h3>
             <p class="text-gray-500 leading-relaxed" style="font-size:0.9375rem;">
-              Colleagues open the app in progress through the VPN, or join your terminal live with <a href="https://github.com/catie-aq/sshx" style="color:#2D7A5F;">SSHX</a>. Nothing is published on the internet.
+              Vos collègues ouvrent l'app en cours via le VPN, ou rejoignent votre terminal en direct avec <a href="https://github.com/catie-aq/sshx" style="color:#2D7A5F;">SSHX</a>. Rien n'est publié sur Internet.
             </p>
           </div>
         </div>
@@ -429,10 +432,10 @@
       <div class="reveal text-center mb-14">
         <h2 class="font-extrabold tracking-tight text-gray-900 mb-3"
             style="font-size:clamp(1.75rem,3.5vw,2.5rem); letter-spacing:-0.02em;">
-          Built for your whole organization
+          Conçu pour toute votre organisation
         </h2>
         <p class="text-gray-500 mx-auto" style="font-size:1.0625rem; max-width:520px; line-height:1.65;">
-          Everyone contributes. Administrators stay in control.
+          Chacun contribue. Les administrateurs gardent la main.
         </p>
       </div>
 
@@ -448,24 +451,24 @@
                 <polyline points="8 6 2 12 8 18"/>
               </svg>
             </div>
-            <h3 class="font-bold text-gray-900">For contributors</h3>
+            <h3 class="font-bold text-gray-900">Pour les contributeurs</h3>
           </div>
           <ul class="space-y-2.5">
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Take part in projects without being a developer
+              Participez aux projets sans être développeur
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Your agent and your skills, ready on arrival
+              Votre agent et vos skills, prêts à l'arrivée
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Access from your laptop or your phone
+              Accès depuis votre portable ou votre mobile
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              A shared terminal to work together
+              Un terminal partagé pour travailler à plusieurs
             </li>
           </ul>
         </div>
@@ -482,24 +485,24 @@
                 <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
               </svg>
             </div>
-            <h3 class="font-bold text-gray-900">For developers</h3>
+            <h3 class="font-bold text-gray-900">Pour les développeurs</h3>
           </div>
           <ul class="space-y-2.5">
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              A persistent workspace, rebuilt in minutes
+              Un espace de travail persistant, reconstruit en minutes
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Agents running in the background
+              Des agents qui tournent en tâche de fond
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Demos on the VPN, not on the internet
+              Des démos sur le VPN, pas sur Internet
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              The same template as the rest of the team
+              Le même template que le reste de l'équipe
             </li>
           </ul>
         </div>
@@ -514,24 +517,24 @@
                 <polyline points="16 7 22 7 22 13"/>
               </svg>
             </div>
-            <h3 class="font-bold text-gray-900">For managers</h3>
+            <h3 class="font-bold text-gray-900">Pour les managers</h3>
           </div>
           <ul class="space-y-2.5">
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Control over where your data goes
+              La maîtrise de la circulation des données
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Switch AI provider company-wide by editing a template
+              Changer de fournisseur IA pour toute l'entreprise en modifiant un template
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Everyone can contribute to projects
+              Tout le monde peut contribuer aux projets
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              No personal cloud machines to keep track of
+              Plus de machines cloud personnelles à suivre
             </li>
           </ul>
         </div>
@@ -545,24 +548,24 @@
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
               </svg>
             </div>
-            <h3 class="font-bold text-gray-900">For administrators</h3>
+            <h3 class="font-bold text-gray-900">Pour les administrateurs</h3>
           </div>
           <ul class="space-y-2.5">
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Incus micro-VMs, created and cloned in a few clicks
+              Micro-VMs Incus créées et clonées en quelques clics
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Colleagues’ SSH keys installed for them
+              Les clés SSH des collègues installées pour eux
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Git access by skill level
+              Accès Git selon le niveau de compétence
             </li>
             <li class="flex items-start gap-2 text-gray-600" style="font-size:0.9375rem;">
               <svg class="flex-shrink-0 mt-0.5" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Hand a machine over to the person it is for
+              Une machine transférée à la personne à qui elle est destinée
             </li>
           </ul>
         </div>
@@ -577,17 +580,17 @@
       <div class="reveal">
         <h2 class="font-extrabold tracking-tight text-gray-900 mb-4"
             style="font-size:clamp(1.75rem,3.5vw,2.75rem); letter-spacing:-0.02em;">
-          Open AI to your whole team, safely.
+          Ouvrez l'IA à toute votre équipe, en sécurité.
         </h2>
         <p class="text-gray-500 mb-8" style="font-size:1.0625rem; line-height:1.65;">
-          Open source. Runs on your own Incus servers, inside your Tailscale network.
+          Open source. Tourne sur vos propres serveurs Incus, dans votre réseau Tailscale.
         </p>
         <div class="flex flex-wrap gap-3 justify-center">
           <a href="https://github.com/poqudrof/Plati" class="btn-primary" style="font-size:1rem; padding:0.875rem 2rem;">
-            Get started
+            Démarrer
           </a>
           <a href="https://github.com/poqudrof/Plati" class="btn-outline" style="font-size:1rem; padding:0.875rem 2rem;">
-            View on GitHub
+            Voir sur GitHub
           </a>
         </div>
       </div>
@@ -610,12 +613,12 @@
         </div>
 
         <div class="flex gap-6">
-          <a href="#" class="text-sm text-gray-400 no-underline hover:text-primary transition-colors">Legal notice</a>
-          <a href="#" class="text-sm text-gray-400 no-underline hover:text-primary transition-colors">Privacy</a>
+          <a href="#" class="text-sm text-gray-400 no-underline hover:text-primary transition-colors">Mentions légales</a>
+          <a href="#" class="text-sm text-gray-400 no-underline hover:text-primary transition-colors">Confidentialité</a>
           <a href="https://github.com/poqudrof" class="text-sm text-gray-400 no-underline hover:text-primary transition-colors">Contact</a>
         </div>
 
-        <p class="text-sm text-gray-300 m-0">© 2026 Jérémy Laviole. All rights reserved.</p>
+        <p class="text-sm text-gray-300 m-0">© 2026 Jérémy Laviole. Tous droits réservés.</p>
       </div>
     </div>
   </footer>

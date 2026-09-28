@@ -7,12 +7,12 @@
 
 ### Hero Section
 **Headline (simple, pas d'animation)**
-> Développez sur vos applications d'entreprise.  
-> **En quelques secondes.**
+> Toute votre équipe construit avec l'IA.  
+> **Vos admins gardent le contrôle.**
 
 **Sous-titre (visible d'emblée)**
-> Plati crée votre environnement de développement prêt à l'emploi.  
-> Codez avec l'IA. Déployez en confiance. Sécurisé par défaut.
+> Plati ouvre Claude Code, Codex CLI ou OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs.  
+> Les administrateurs décident qui y accède, à quels dépôts, avec quelles clés et quels secrets.
 
 **CTA principal (boutons simples, hover subtil)**
 > [Essayer gratuitement] [Voir la démo ↗]
@@ -364,6 +364,8 @@ Primary CTA:
 ## 📝 Copywriting - Phrases Percutantes
 
 ### Headlines alternatifs
+- "Donnez accès à des agents IA dans des sandbox contrôlées par votre administrateur. En quelques clics."
+- "Développez sur vos applications d'entreprise. En quelques secondes." (ancien hero)
 - "Développez à la vitesse de l'IA"
 - "Votre environnement de dev. Prêt maintenant."
 - "Codez sur vos apps métier. Sans friction."
