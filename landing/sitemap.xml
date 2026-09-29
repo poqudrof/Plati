@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copié dans dist/ par `npm run build`. Mettre à jour lastmod quand le contenu des pages change. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://plati.jeremy-laviole.fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://plati.jeremy-laviole.fr/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://plati.jeremy-laviole.fr/fr/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://plati.jeremy-laviole.fr/"/>
+    <lastmod>2026-09-26</lastmod>
+  </url>
+  <url>
+    <loc>https://plati.jeremy-laviole.fr/fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://plati.jeremy-laviole.fr/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://plati.jeremy-laviole.fr/fr/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://plati.jeremy-laviole.fr/"/>
+    <lastmod>2026-09-26</lastmod>
+  </url>
+</urlset>

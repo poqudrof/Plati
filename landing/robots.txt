@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://plati.jeremy-laviole.fr/sitemap.xml
