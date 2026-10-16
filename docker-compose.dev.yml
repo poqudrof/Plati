@@ -8,7 +8,7 @@
 #                 ├─ « frontend »  vite dev  0.0.0.0:${APP_PORT}  ┐ network_mode:
 #                 └─ « backend »   Go        0.0.0.0:8080         ┘ service:tailscale
 #                                          │
-#                                          ▼ 172.31.240.1:8444
+#                                          ▼ 172.31.240.1:8445
 #                                    Incus, sur l'HÔTE
 #
 # MÊME BASE que docker-compose.prod.yml : mêmes images, mêmes sources bind-montées,

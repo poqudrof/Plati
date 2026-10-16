@@ -8,7 +8,7 @@
 #                 ├─ « frontend » node server.js  0.0.0.0:${APP_PORT}  ┐ network_mode:
 #                 └─ « backend »  Go              127.0.0.1:8080       ┘ service:tailscale
 #                                          │
-#                                          ▼ 172.31.240.1:8443
+#                                          ▼ 172.31.240.1:8445
 #                                    Incus, sur l'HÔTE
 #
 # SEULE différence de fond avec docker-compose.dev.yml, en plus du tailnet : le

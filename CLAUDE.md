@@ -32,7 +32,7 @@ port, which would yield the invalid `wss://<host>:`. So `VITE_HMR_CLIENT_PORT=44
 the compose file and read by `vite.config.ts`. The trade-off: `127.0.0.1:5300` still serves the
 app but gets no hot reload. Set `VITE_HMR_CLIENT_PORT=5300` to flip it.
 
-Incus runs on the host and is reached at **`172.31.240.1:8444`** — the gateway of the pinned
+Incus runs on the host and is reached at **`172.31.240.1:8445`** — the gateway of the pinned
 `plati` subnet, not `host.docker.internal`. That is not a style choice: Docker rejects
 `extra_hosts` together with `network_mode: service:*` (*"conflicting options: custom host-to-IP
 mapping and the network mode"*), so `host.docker.internal` cannot be mapped and would not
@@ -44,7 +44,7 @@ never touches the network and the startup log prints `connected to Incus server 
 when the endpoint is unreachable. Check it for real instead:
 
 ```bash
-docker exec plati-backend curl -sk -o /dev/null -w '%{http_code}\n' https://172.31.240.1:8444/1.0
+docker exec plati-backend curl -sk -o /dev/null -w '%{http_code}\n' https://172.31.240.1:8445/1.0
 ```
 
 `./scripts/setup-dev.sh` + `make dev` / `mprocs` remain the host-native path (Go and Node
