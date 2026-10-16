@@ -32,9 +32,31 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Password string `json:"password"`
 		Role     string `json:"role"`
+		// SSHOnly creates someone who only has SSH keys: no password, no login.
+		// PublicKey (and its optional KeyName) registers their first key in the same call.
+		SSHOnly   bool   `json:"ssh_only"`
+		PublicKey string `json:"public_key"`
+		KeyName   string `json:"key_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if req.SSHOnly {
+		if req.Email == "" {
+			writeError(w, http.StatusBadRequest, "email is required")
+			return
+		}
+		user, err := h.userSvc.CreateSSHOnlyUser(req.Email, req.Name, req.KeyName, req.PublicKey)
+		if errors.Is(err, services.ErrInvalidPublicKey) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create user")
+			return
+		}
+		writeJSON(w, http.StatusCreated, user)
 		return
 	}
 	if req.Email == "" || req.Password == "" {
@@ -72,9 +94,26 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		Role string `json:"role"`
 		// Optional: an empty password leaves the current one untouched.
 		Password string `json:"password"`
+		// Optional: absent leaves the account as it is. true drops the password and the
+		// admin role and bars every login; false lifts that, and a password is then
+		// needed for the account to log in again.
+		SSHOnly *bool `json:"ssh_only"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	current, err := h.userSvc.GetUser(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	sshOnly := current.SSHOnly
+	if req.SSHOnly != nil {
+		sshOnly = *req.SSHOnly
+	}
+	if sshOnly && (req.Password != "" || req.Role == "admin") {
+		writeError(w, http.StatusBadRequest, "an SSH-only user has no password and cannot be an admin")
 		return
 	}
 	if req.Password != "" && len(req.Password) < services.MinPasswordLength {
@@ -85,6 +124,13 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.userSvc.UpdateUser(id, req.Name, req.Role); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update user")
 		return
+	}
+	// After UpdateUser, so switching to SSH-only gets the last word on the role.
+	if req.SSHOnly != nil {
+		if err := h.userSvc.SetSSHOnly(id, *req.SSHOnly); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update user")
+			return
+		}
 	}
 	if req.Password != "" {
 		if err := h.userSvc.SetPassword(id, req.Password); err != nil {

@@ -184,6 +184,23 @@ leaves the current one untouched, so the same form saves name, role and password
 minimum is `services.MinPasswordLength` (8), the same floor the setup wizard enforces. There is
 no "confirm the old password" step: the admin never needs to know it.
 
+### SSH-only users
+
+`users.ssh_only` (migration 022) marks someone who only has SSH keys — a contractor, a
+student — and must never log into Plati. They are ordinary `users` rows, so their public
+keys are managed in **Admin → Users → Keys** and offered on the SSH Access tab like any
+other account's (to an admin; a regular owner only sees administrators' keys).
+
+Created with `POST /api/v1/admin/users` `{"email","name","ssh_only":true}` — no password —
+plus an optional `public_key` / `key_name` registering their first key in the same call
+(validated first, so a bad key creates no account).
+`PUT /api/v1/admin/users/{id}` takes an optional `ssh_only`: turning it on clears
+`password_hash` and forces `role = 'user'`; an SSH-only account cannot be given a password
+or the admin role (400). Every auth path refuses them: password login, the Entra callback
+(403), API keys, and an **already-issued JWT** — `AuthMiddleware` asks
+`APIKeyAuthenticator.LoginBlocked` on every cookie request, so switching an account ends
+its open session instead of leaving it valid until the token expires.
+
 ## Incus Integration
 
 `internal/incus/`:

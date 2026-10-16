@@ -103,6 +103,37 @@ func (s *UserService) CreateUser(email, name, role, password string) (*models.Us
 	return queries.GetUserByID(s.db, id)
 }
 
+// CreateSSHOnlyUser creates someone who only has SSH keys and cannot log into Plati.
+// publicKey is optional; when given it is validated before the account is created, so
+// a malformed key (ErrInvalidPublicKey) leaves nothing behind.
+func (s *UserService) CreateSSHOnlyUser(email, name, keyName, publicKey string) (*models.User, error) {
+	normalized := ""
+	if strings.TrimSpace(publicKey) != "" {
+		var err error
+		if normalized, err = NormalizeSSHPublicKey(publicKey); err != nil {
+			return nil, err
+		}
+	}
+	id, err := queries.CreateSSHOnlyUser(s.db, email, name)
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	if normalized != "" {
+		if keyName == "" {
+			keyName = "default"
+		}
+		if _, err := queries.CreateSSHKey(s.db, id, keyName, normalized); err != nil {
+			return nil, fmt.Errorf("add public key: %w", err)
+		}
+	}
+	return queries.GetUserByID(s.db, id)
+}
+
+// SetSSHOnly switches an account to or from SSH-only — see queries.SetUserSSHOnly.
+func (s *UserService) SetSSHOnly(id int64, sshOnly bool) error {
+	return queries.SetUserSSHOnly(s.db, id, sshOnly)
+}
+
 func (s *UserService) DeleteUser(id int64) error {
 	return queries.DeleteUser(s.db, id)
 }

@@ -29,7 +29,10 @@ type User struct {
 	Role         string         `db:"role" json:"role"` // "admin" or "user"
 	EntraID      sql.NullString `db:"entra_id" json:"-"`
 	PasswordHash sql.NullString `db:"password_hash" json:"-"`
-	CreatedAt    time.Time      `db:"created_at" json:"created_at"`
+	// SSHOnly marks someone who only has SSH keys: no password, and every way of
+	// logging into Plati refuses them. Always a "user", never an admin.
+	SSHOnly   bool      `db:"ssh_only" json:"ssh_only"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
 }
 

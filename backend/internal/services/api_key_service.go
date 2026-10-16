@@ -87,6 +87,9 @@ func (s *APIKeyService) Authenticate(plaintext string) (*models.User, error) {
 	if err != nil {
 		return nil, err
 	}
+	if user.SSHOnly {
+		return nil, fmt.Errorf("user %d has SSH access only", user.ID)
+	}
 	_ = queries.TouchAPIKeyLastUsed(s.db, key.ID)
 	return user, nil
 }
@@ -106,4 +109,8 @@ func (a apiKeyAuthenticator) Authenticate(plaintext string) (*auth.ContextUser, 
 		return nil, err
 	}
 	return &auth.ContextUser{ID: user.ID, Email: user.Email, Role: user.Role}, nil
+}
+
+func (a apiKeyAuthenticator) LoginBlocked(userID int64) bool {
+	return queries.IsUserSSHOnly(a.svc.db, userID)
 }

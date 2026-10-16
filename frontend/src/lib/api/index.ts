@@ -155,9 +155,12 @@ export const admin = {
     list: () => api.get<User[]>('/api/v1/admin/users'),
     create: (email: string, name: string, password: string, role: 'admin' | 'user') =>
       api.post<User>('/api/v1/admin/users', { email, name, password, role }),
+    // Someone who only has SSH keys: no password, no login.
+    createSSHOnly: (email: string, name: string, public_key = '', key_name = '') =>
+      api.post<User>('/api/v1/admin/users', { email, name, ssh_only: true, public_key, key_name }),
     // password is optional — omit or leave empty to keep the current one.
-    update: (id: number, name: string, role: string, password?: string) =>
-      api.put(`/api/v1/admin/users/${id}`, { name, role, password: password || '' }),
+    update: (id: number, name: string, role: string, password?: string, ssh_only?: boolean) =>
+      api.put(`/api/v1/admin/users/${id}`, { name, role, password: password || '', ssh_only }),
     delete: (id: number) => api.del(`/api/v1/admin/users/${id}`),
     listKeys: (id: number) => api.get<UserSSHKey[]>(`/api/v1/admin/users/${id}/keys`),
     generateKey: (id: number, name: string) =>

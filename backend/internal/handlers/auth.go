@@ -38,7 +38,7 @@ func (h *AuthHandler) LoginAdmin(w http.ResponseWriter, r *http.Request) {
 	// User login: email + password against per-user password_hash
 	if req.Email != "" {
 		user, err := queries.GetUserByEmail(h.db, req.Email)
-		if err != nil || !user.PasswordHash.Valid {
+		if err != nil || user.SSHOnly || !user.PasswordHash.Valid {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
@@ -113,6 +113,11 @@ func (h *AuthHandler) CallbackEntra(w http.ResponseWriter, r *http.Request) {
 	user, err := queries.UpsertEntraUser(h.db, entraUser.Email, entraUser.Name, entraUser.Sub)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	if user.SSHOnly {
+		writeError(w, http.StatusForbidden, "this account has SSH access only and cannot log into Plati")
 		return
 	}
 

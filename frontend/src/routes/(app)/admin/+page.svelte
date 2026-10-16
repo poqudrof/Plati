@@ -21,8 +21,33 @@
   let expandedTemplate: number | null = $state(null);
 
   // User editing
-  let editingUser: { id: number; name: string; role: string; email: string; password: string } | null = $state(null);
-  let creatingUser: { email: string; name: string; password: string; isAdmin: boolean } | null = $state(null);
+  let editingUser: { id: number; name: string; role: string; email: string; password: string; sshOnly: boolean; wasSSHOnly: boolean } | null = $state(null);
+  let creatingUser: { email: string; name: string; password: string; isAdmin: boolean; sshOnly: boolean; keyName: string; publicKey: string } | null = $state(null);
+  let creatingBusy = $state(false);
+  let editingBusy = $state(false);
+
+  // A light client-side check so an obvious paste mistake is flagged before submit; the
+  // server still runs the real ssh.ParseAuthorizedKey validation.
+  function looksLikePublicKey(key: string): boolean {
+    return /^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-[\w.-]+@openssh\.com)\s+AAAA[0-9A-Za-z+/=]+/.test(key.trim());
+  }
+
+  let createUserValid = $derived.by(() => {
+    if (!creatingUser) return false;
+    if (!creatingUser.email.trim().includes('@')) return false;
+    if (creatingUser.sshOnly) {
+      const key = creatingUser.publicKey.trim();
+      return key === '' || looksLikePublicKey(key);
+    }
+    return creatingUser.password.length >= 8;
+  });
+
+  let editUserValid = $derived.by(() => {
+    if (!editingUser) return false;
+    if (editingUser.sshOnly) return true;
+    if (editingUser.wasSSHOnly) return editingUser.password.length >= 8;
+    return editingUser.password === '' || editingUser.password.length >= 8;
+  });
 
   // Managed SSH Keys
   let managedKeyList: ManagedSSHKey[] = $state([]);
@@ -108,23 +133,23 @@
 
   // User actions
   function startEditUser(user: User) {
-    editingUser = { id: user.id, name: user.name, role: user.role, email: user.email, password: '' };
+    editingUser = { id: user.id, name: user.name, role: user.role, email: user.email, password: '', sshOnly: user.ssh_only, wasSSHOnly: user.ssh_only };
   }
 
   async function saveUser() {
-    if (!editingUser) return;
-    const password = editingUser.password.trim();
-    if (password && password.length < 8) {
-      addNotification('error', 'Password must be at least 8 characters');
-      return;
-    }
+    if (!editingUser || !editUserValid) return;
+    if (editingUser.sshOnly && !editingUser.wasSSHOnly &&
+        !confirm(`Switch ${editingUser.email} to SSH only? Their password is removed and they are logged out of Plati right away.`)) return;
+    const password = editingUser.sshOnly ? '' : editingUser.password;
+    editingBusy = true;
     try {
-      await admin.users.update(editingUser.id, editingUser.name, editingUser.role, password);
+      await admin.users.update(editingUser.id, editingUser.name, editingUser.sshOnly ? 'user' : editingUser.role, password, editingUser.sshOnly);
       const changedPassword = password !== '';
       editingUser = null;
       await loadUsers();
       addNotification('success', changedPassword ? 'User updated — password changed' : 'User updated');
     } catch (e: any) { addNotification('error', e.message); }
+    finally { editingBusy = false; }
   }
 
   async function deleteUser(user: User) {
@@ -137,8 +162,21 @@
   }
 
   async function createUser() {
-    if (!creatingUser) return;
+    if (!creatingUser || !createUserValid) return;
+    creatingBusy = true;
     try {
+      if (creatingUser.sshOnly) {
+        const withKey = creatingUser.publicKey.trim() !== '';
+        const user = await admin.users.createSSHOnly(
+          creatingUser.email, creatingUser.name, creatingUser.publicKey.trim(), creatingUser.keyName.trim()
+        );
+        creatingUser = null;
+        await loadUsers();
+        addNotification('success', withKey ? 'SSH-only user created with their key' : 'SSH-only user created — add their public key');
+        // Their keys are the whole point of the account: without one, go straight to them.
+        if (!withKey) openUserKeys(user);
+        return;
+      }
       await admin.users.create(
         creatingUser.email,
         creatingUser.name,
@@ -149,6 +187,7 @@
       await loadUsers();
       addNotification('success', 'User created');
     } catch (e: any) { addNotification('error', e.message); }
+    finally { creatingBusy = false; }
   }
 
   function parseResources(resources: string): Record<string, string> {
@@ -677,10 +716,10 @@
   {#if tab === 'users'}
     <div class="flex justify-end mb-3">
       <button
-        onclick={() => creatingUser = { email: '', name: '', password: '', isAdmin: false }}
-        class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark text-sm"
+        onclick={() => creatingUser = { email: '', name: '', password: '', isAdmin: false, sshOnly: false, keyName: '', publicKey: '' }}
+        class="btn-primary btn-sm"
       >
-        Create User
+        New user
       </button>
     </div>
     <div class="bg-white border rounded-lg overflow-hidden">
@@ -700,9 +739,13 @@
               <td class="px-4 py-3 text-sm">{user.email}</td>
               <td class="px-4 py-3 text-sm">{user.name}</td>
               <td class="px-4 py-3">
-                <span class="px-2 py-1 rounded text-xs {user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
-                  {user.role}
-                </span>
+                {#if user.ssh_only}
+                  <span class="px-2 py-1 rounded text-xs bg-amber-100 text-amber-800" title="Has SSH keys only — cannot log into Plati">SSH only</span>
+                {:else}
+                  <span class="px-2 py-1 rounded text-xs {user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
+                    {user.role}
+                  </span>
+                {/if}
               </td>
               <td class="px-4 py-3 text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString()}</td>
               <td class="px-4 py-3 text-right">
@@ -919,34 +962,112 @@
 
 <!-- Create User Modal -->
 {#if creatingUser}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) creatingUser = null; }}>
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-      <div class="p-6">
-        <h2 class="text-lg font-bold mb-4">Create User</h2>
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input type="email" bind:value={creatingUser.email} class="w-full px-3 py-2 border rounded" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input type="text" bind:value={creatingUser.name} class="w-full px-3 py-2 border rounded" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" bind:value={creatingUser.password} class="w-full px-3 py-2 border rounded" />
-          </div>
-          <div class="flex items-center gap-2">
-            <input type="checkbox" bind:checked={creatingUser.isAdmin} id="create-user-admin" />
-            <label for="create-user-admin" class="text-sm font-medium text-gray-700">Admin</label>
-          </div>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => { if (e.target === e.currentTarget && !creatingBusy) creatingUser = null; }}>
+    <form class="card-static shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onsubmit={(e) => { e.preventDefault(); createUser(); }}>
+      <div class="p-6 space-y-6">
+        <div>
+          <h2 class="text-lg font-extrabold tracking-tight text-gray-900">New user</h2>
+          <p class="text-sm text-gray-500 mt-1">Choose how this person will use Plati, then fill in their details.</p>
         </div>
-        <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
-          <button onclick={() => creatingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={createUser} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Create</button>
+
+        <!-- Access type: two cards, one of them selected -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Access type">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!creatingUser.sshOnly}
+            onclick={() => creatingUser && (creatingUser.sshOnly = false)}
+            class="text-left p-4 rounded-xl border transition-colors duration-200 {creatingUser.sshOnly ? 'border-gray-200 hover:border-gray-300' : 'border-primary bg-primary-50'}"
+          >
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              </span>
+              <span class="font-semibold text-sm text-gray-900">Plati account</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 leading-relaxed">Logs into the app with email and password. Creates and manages their own instances.</p>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={creatingUser.sshOnly}
+            onclick={() => creatingUser && (creatingUser.sshOnly = true)}
+            class="text-left p-4 rounded-xl border transition-colors duration-200 {creatingUser.sshOnly ? 'border-primary bg-primary-50' : 'border-gray-200 hover:border-gray-300'}"
+          >
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              </span>
+              <span class="font-semibold text-sm text-gray-900">SSH only</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 leading-relaxed">Connects to instances over SSH with a public key. No password, cannot log into Plati.</p>
+          </button>
+        </div>
+
+        <div class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label for="create-user-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input id="create-user-name" type="text" bind:value={creatingUser.name} placeholder="Jane Doe" class="input" />
+            </div>
+            <div>
+              <label for="create-user-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input id="create-user-email" type="email" bind:value={creatingUser.email} placeholder="jane@example.com" class="input" required />
+            </div>
+          </div>
+
+          {#if creatingUser.sshOnly}
+            <div>
+              <label for="create-user-public-key" class="block text-sm font-medium text-gray-700 mb-1">
+                Public key <span class="font-normal text-gray-400">— optional, can be added later</span>
+              </label>
+              <textarea
+                id="create-user-public-key"
+                bind:value={creatingUser.publicKey}
+                rows="3"
+                placeholder="ssh-ed25519 AAAAC3NzaC1… jane@laptop"
+                class="input font-mono text-xs resize-y"
+              ></textarea>
+              {#if creatingUser.publicKey.trim() && !looksLikePublicKey(creatingUser.publicKey)}
+                <p class="text-xs text-red-600 mt-1">This does not look like an OpenSSH public key (expected something like <span class="font-mono">ssh-ed25519 AAAA…</span>).</p>
+              {:else}
+                <p class="text-xs text-gray-400 mt-1">The content of their <span class="font-mono">~/.ssh/id_ed25519.pub</span>. It is written to <span class="font-mono">authorized_keys</span> on the instances you grant them.</p>
+              {/if}
+            </div>
+            {#if creatingUser.publicKey.trim()}
+              <div>
+                <label for="create-user-key-name" class="block text-sm font-medium text-gray-700 mb-1">
+                  Key label <span class="font-normal text-gray-400">— optional</span>
+                </label>
+                <input id="create-user-key-name" type="text" bind:value={creatingUser.keyName} placeholder="laptop" class="input" />
+              </div>
+            {/if}
+          {:else}
+            <div>
+              <label for="create-user-password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input id="create-user-password" type="password" autocomplete="new-password" bind:value={creatingUser.password} class="input" required minlength="8" />
+              <p class="text-xs mt-1 {creatingUser.password && creatingUser.password.length < 8 ? 'text-red-600' : 'text-gray-400'}">
+                At least 8 characters. Share it with them yourself — Plati sends no email.
+              </p>
+            </div>
+            <label class="flex items-start gap-3 p-3 rounded-md border border-gray-200 cursor-pointer hover:border-gray-300 transition-colors">
+              <input type="checkbox" bind:checked={creatingUser.isAdmin} class="mt-0.5 accent-primary" />
+              <span>
+                <span class="block text-sm font-medium text-gray-700">Administrator</span>
+                <span class="block text-xs text-gray-500 mt-0.5">Manages users, templates, servers and every instance on the platform.</span>
+              </span>
+            </label>
+          {/if}
         </div>
       </div>
-    </div>
+
+      <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+        <button type="button" onclick={() => creatingUser = null} disabled={creatingBusy} class="btn-secondary">Cancel</button>
+        <button type="submit" disabled={!createUserValid || creatingBusy} class="btn-primary">
+          {#if creatingBusy}Creating…{:else if creatingUser.sshOnly}Create SSH-only user{:else}Create user{/if}
+        </button>
+      </div>
+    </form>
   </div>
 {/if}
 
@@ -1145,42 +1266,96 @@
 
 <!-- Edit User Modal -->
 {#if editingUser}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={(e) => { if (e.target === e.currentTarget) editingUser = null; }}>
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-      <div class="p-6">
-        <h2 class="text-lg font-bold mb-4">Edit User</h2>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => { if (e.target === e.currentTarget && !editingBusy) editingUser = null; }}>
+    <form class="card-static shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onsubmit={(e) => { e.preventDefault(); saveUser(); }}>
+      <div class="p-6 space-y-6">
+        <div>
+          <h2 class="text-lg font-extrabold tracking-tight text-gray-900">Edit user</h2>
+          <p class="text-sm text-gray-500 mt-1 font-mono">{editingUser.email}</p>
+        </div>
+
+        <!-- Access type -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Access type">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!editingUser.sshOnly}
+            onclick={() => editingUser && (editingUser.sshOnly = false)}
+            class="text-left p-4 rounded-xl border transition-colors duration-200 {editingUser.sshOnly ? 'border-gray-200 hover:border-gray-300' : 'border-primary bg-primary-50'}"
+          >
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              </span>
+              <span class="font-semibold text-sm text-gray-900">Plati account</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 leading-relaxed">Logs into the app with email and password.</p>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={editingUser.sshOnly}
+            onclick={() => editingUser && (editingUser.sshOnly = true)}
+            class="text-left p-4 rounded-xl border transition-colors duration-200 {editingUser.sshOnly ? 'border-primary bg-primary-50' : 'border-gray-200 hover:border-gray-300'}"
+          >
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-md bg-white border border-gray-200 flex items-center justify-center shrink-0">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2D7A5F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              </span>
+              <span class="font-semibold text-sm text-gray-900">SSH only</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 leading-relaxed">SSH access to instances only. Cannot log into Plati.</p>
+          </button>
+        </div>
+
+        {#if editingUser.sshOnly && !editingUser.wasSSHOnly}
+          <div class="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
+            Switching to SSH only removes their password and ends any open session right away. Their SSH keys are kept.
+          </div>
+        {:else if !editingUser.sshOnly && editingUser.wasSSHOnly}
+          <div class="p-3 rounded-md bg-primary-50 border border-primary/20 text-sm text-gray-700">
+            This account has no password yet — set one below so they can log in.
+          </div>
+        {/if}
+
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input type="text" bind:value={editingUser.name} class="w-full px-3 py-2 border rounded" />
+            <label for="edit-user-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input id="edit-user-name" type="text" bind:value={editingUser.name} class="input" />
           </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select bind:value={editingUser.role} class="w-full px-3 py-2 border rounded">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-          <div class="pt-4 border-t">
-            <label for="edit-user-password" class="block text-sm font-medium text-gray-700 mb-1">New password</label>
-            <input
-              id="edit-user-password"
-              type="password"
-              autocomplete="new-password"
-              placeholder="Leave blank to keep the current one"
-              bind:value={editingUser.password}
-              class="w-full px-3 py-2 border rounded" />
-            <p class="text-xs text-gray-500 mt-1">
-              At least 8 characters. Replaces the password for <span class="font-mono">{editingUser.email}</span>
-              immediately — the user is not notified.
-            </p>
-          </div>
-        </div>
-        <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
-          <button onclick={() => editingUser = null} class="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
-          <button onclick={saveUser} class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark">Save</button>
+
+          {#if !editingUser.sshOnly}
+            <label class="flex items-start gap-3 p-3 rounded-md border border-gray-200 cursor-pointer hover:border-gray-300 transition-colors">
+              <input type="checkbox" checked={editingUser.role === 'admin'} onchange={(e) => editingUser && (editingUser.role = (e.currentTarget as HTMLInputElement).checked ? 'admin' : 'user')} class="mt-0.5 accent-primary" />
+              <span>
+                <span class="block text-sm font-medium text-gray-700">Administrator</span>
+                <span class="block text-xs text-gray-500 mt-0.5">Manages users, templates, servers and every instance on the platform.</span>
+              </span>
+            </label>
+            <div>
+              <label for="edit-user-password" class="block text-sm font-medium text-gray-700 mb-1">
+                {editingUser.wasSSHOnly ? 'Password' : 'New password'}
+                {#if !editingUser.wasSSHOnly}<span class="font-normal text-gray-400">— leave blank to keep the current one</span>{/if}
+              </label>
+              <input
+                id="edit-user-password"
+                type="password"
+                autocomplete="new-password"
+                bind:value={editingUser.password}
+                required={editingUser.wasSSHOnly}
+                class="input" />
+              <p class="text-xs mt-1 {editingUser.password && editingUser.password.length < 8 ? 'text-red-600' : 'text-gray-400'}">
+                At least 8 characters. Takes effect immediately — the user is not notified.
+              </p>
+            </div>
+          {/if}
         </div>
       </div>
-    </div>
+
+      <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+        <button type="button" onclick={() => editingUser = null} disabled={editingBusy} class="btn-secondary">Cancel</button>
+        <button type="submit" disabled={!editUserValid || editingBusy} class="btn-primary">{editingBusy ? 'Saving…' : 'Save changes'}</button>
+      </div>
+    </form>
   </div>
 {/if}

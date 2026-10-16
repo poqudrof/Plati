@@ -3,6 +3,8 @@ export interface User {
   email: string;
   name: string;
   role: 'admin' | 'user';
+  /** Only has SSH keys: no password, cannot log into Plati. Never an admin. */
+  ssh_only: boolean;
   created_at: string;
   updated_at: string;
 }
