@@ -308,3 +308,7 @@ tailscale serve  --service=svc:plati --https=443 127.0.0.1:5300
 −> Allow in admin 
 
 #To remove config for the service, run: tailscale serve clear svc:plati
+## License
+
+Plati is open source under the [Apache License 2.0](LICENSE).
+Copyright 2026 Jérémy Laviole.
