@@ -3,8 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plati — L'IA pour toute l'équipe, sous contrôle</title>
-  <meta name="description" content="Plati ouvre Claude Code, Codex CLI ou OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs. Tout le monde contribue aux projets avec l'IA ; les administrateurs gèrent les accès, les clés et les droits Git.">
+  <title>Plati — Claude Code et Codex auto-hébergés pour votre équipe</title>
+  <meta name="description" content="Plateforme open source et auto-hébergée qui lance Claude Code, Codex CLI et OpenCode dans des micro-VMs Incus sécurisées. Toute l'équipe travaille avec l'IA ; les admins gèrent accès, clés et droits Git.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="theme-color" content="#2D7A5F">
+
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+  <!-- Aperçu de partage (LinkedIn, Slack, X…). Image : og-image.png, 1200×630. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Plati">
+  <meta property="og:url" content="https://plati.jeremy-laviole.fr/fr/">
+  <meta property="og:title" content="Plati — Des agents IA auto-hébergés pour toute l'équipe">
+  <meta property="og:description" content="Claude Code, Codex CLI et OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs Incus. Open source ; les admins gardent la main sur les accès, les clés et les droits Git.">
+  <meta property="og:image" content="https://plati.jeremy-laviole.fr/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Plati — Des agents IA auto-hébergés pour toute l'équipe">
+  <meta property="og:locale" content="fr_FR">
+  <meta property="og:locale:alternate" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Plati — Des agents IA auto-hébergés pour toute l'équipe">
+  <meta name="twitter:description" content="Claude Code, Codex CLI et OpenCode dans des micro-VMs sécurisées, sur vos propres serveurs Incus.">
+  <meta name="twitter:image" content="https://plati.jeremy-laviole.fr/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "@id": "https://plati.jeremy-laviole.fr/#software",
+    "name": "Plati",
+    "url": "https://plati.jeremy-laviole.fr/fr/",
+    "inLanguage": "fr",
+    "description": "Plateforme open source et auto-hébergée qui donne à chaque membre de l'équipe une micro-VM Incus sécurisée avec un agent IA (Claude Code, Codex CLI, OpenCode), sous le contrôle des administrateurs.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux",
+    "image": "https://plati.jeremy-laviole.fr/og-image.png",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+    "author": { "@type": "Person", "name": "Jérémy Laviole", "url": "https://github.com/poqudrof" },
+    "sameAs": ["https://github.com/poqudrof/Plati"],
+    "keywords": "auto-hébergé, Claude Code, Codex CLI, OpenCode, agents IA, micro-VM, bac à sable, Incus, Tailscale, environnements de développement"
+  }
+  </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -95,6 +137,7 @@
       width: 2px; background: #E5E7EB; flex: 1; margin-top: 6px;
     }
   </style>
+  <noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
 </head>
 
 <body class="font-sans text-gray-900 antialiased" style="background:#FAFAFA;">
@@ -120,6 +163,7 @@
           <a href="#features" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Fonctionnalités</a>
           <a href="#how-it-works" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Comment ça marche</a>
           <a href="#benefits" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">Bénéfices</a>
+          <a href="#faq" class="text-sm font-medium text-gray-500 hover:text-primary transition-colors no-underline">FAQ</a>
         </div>
 
         <!-- CTA + hamburger -->
@@ -152,6 +196,7 @@
       <a href="#features" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Fonctionnalités</a>
       <a href="#how-it-works" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Comment ça marche</a>
       <a href="#benefits" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">Bénéfices</a>
+      <a href="#faq" onclick="closeMenu()" class="block py-2 text-gray-700 font-medium border-b border-gray-50 no-underline">FAQ</a>
       <a href="https://github.com/poqudrof/Plati" onclick="closeMenu()" class="btn-primary mt-2 justify-center">Démarrer</a>
     </div>
   </nav>
@@ -573,6 +618,49 @@
           </ul>
         </div>
 
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== FAQ ======================== -->
+  <section id="faq" class="py-20" style="border-top:1px solid #F3F4F6;">
+    <div class="max-w-3xl mx-auto px-6">
+
+      <div class="reveal text-center mb-12">
+        <h2 class="font-extrabold tracking-tight text-gray-900 mb-3"
+            style="font-size:clamp(1.75rem,3.5vw,2.5rem); letter-spacing:-0.02em;">
+          Questions fréquentes
+        </h2>
+        <p class="text-gray-500 mx-auto" style="font-size:1.0625rem; max-width:520px; line-height:1.65;">
+          Ce qu’on demande avant d’installer Plati.
+        </p>
+      </div>
+
+      <div class="space-y-3">
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Qu’est-ce que Plati ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Plati est une plateforme open source et auto-hébergée qui donne à chaque membre de l’équipe sa propre micro-VM — un conteneur Incus — avec un agent IA de code déjà installé à côté des dépôts du projet. Les administrateurs décident qui reçoit une machine, quels dépôts Git elle atteint et quels secrets elle porte.</p>
+        </details>
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Quels agents IA Plati prend-il en charge ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Claude Code est fourni sous forme de mixin de template prêt à l’emploi ; Codex CLI et OpenCode s’ajoutent en une ligne d’installation. Les templates sont du YAML : changer de fournisseur d’IA pour toute l’entreprise, c’est modifier un template et reconstruire les machines.</p>
+        </details>
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Faut-il un fournisseur cloud ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Non. Plati tourne sur vos propres serveurs Linux avec Incus. Chaque micro-VM rejoint votre réseau Tailscale : on s’y connecte en SSH depuis un portable ou un téléphone, sans rien exposer sur internet. Le code et les données restent sur votre matériel.</p>
+        </details>
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Quelle différence avec GitHub Codespaces ou un bac à sable IA hébergé ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Plati en est l’alternative auto-hébergée : les machines tournent sur vos serveurs, pas dans le cloud d’un éditeur. Les administrateurs installent les clés SSH des collègues, donnent les accès Git selon le niveau de chacun, chiffrent les secrets et fixent pour chaque espace des limites CPU et mémoire et un arrêt automatique.</p>
+        </details>
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Mon espace de travail est-il conservé quand la machine est reconstruite ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Oui. Le répertoire personnel est sur un volume persistant qui survit aux reconstructions ; on peut en prendre des instantanés, le parcourir et télécharger des fichiers depuis l’interface web. Une installation qui marche se copie aussi à un collègue en quelques clics.</p>
+        </details>
+        <details class="card reveal px-6 py-5">
+          <summary class="font-semibold text-gray-900 cursor-pointer">Des personnes qui ne sont pas développeuses peuvent-elles l’utiliser ?</summary>
+          <p class="text-gray-600 mt-3 mb-0" style="font-size:0.9375rem; line-height:1.7;">Oui, c’est le but. Chacun reçoit une machine avec l’agent et les skills de l’équipe déjà prêts, travaille depuis un terminal dans le navigateur ou son téléphone, et partage un terminal en direct avec un collègue grâce à SSHX.</p>
+        </details>
       </div>
     </div>
   </section>

@@ -2,6 +2,8 @@
 
 **Open AI coding agents to your whole team, in sandboxes your administrators control.**
 
+🌐 **Website: [plati.jeremy-laviole.fr](https://plati.jeremy-laviole.fr/)** · [Version française](https://plati.jeremy-laviole.fr/fr/)
+
 Plati is a self-hosted platform that gives each person a micro-VM (an [Incus](https://linuxcontainers.org/incus/)
 container) with an AI agent harness — Claude Code, Codex CLI, OpenCode — already installed
 next to the project's repositories. Everyone can take part in a project through the agent:
