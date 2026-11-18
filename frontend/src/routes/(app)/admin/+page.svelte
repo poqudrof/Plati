@@ -1,4 +1,5 @@
 <script lang="ts">
+  import McpLimitsCard from '$lib/components/McpLimitsCard.svelte';
   import { browser } from '$app/environment';
   import { admin, templates as templatesApi } from '$lib/api';
   import type { Template, Server, User, SSHKey, ManagedSSHKey, GeneratedManagedKeyResult, GitRepo, UserSSHKey, AdminGeneratedUserKeyResult, ApiKey, GeneratedApiKeyResult } from '$lib/api/types';
@@ -629,6 +630,7 @@
           </button>
         </div>
       </div>
+      <McpLimitsCard />
     </div>
   {/if}
 

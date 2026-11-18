@@ -32,6 +32,7 @@
             <a href="/dashboard" class="text-gray-600 hover:text-gray-900">Dashboard</a>
             <a href="/instances/new" class="text-gray-600 hover:text-gray-900">New Instance</a>
             <a href="/disks" class="text-gray-600 hover:text-gray-900">Disks</a>
+            <a href="/agents" class="text-gray-600 hover:text-gray-900">Agents</a>
             <a href="/settings" class="text-gray-600 hover:text-gray-900">Settings</a>
             <a href="/docs" class="text-gray-600 hover:text-gray-900">Docs</a>
             {#if $currentUser.role === 'admin'}
@@ -101,6 +102,9 @@
         </a>
         <a href="/disks" onclick={closeMenu} class="block px-4 py-3 text-gray-700 hover:bg-gray-100 {isActive('/disks') ? 'bg-gray-50 text-primary font-medium' : ''}">
           Disks
+        </a>
+        <a href="/agents" onclick={closeMenu} class="block px-4 py-3 text-gray-700 hover:bg-gray-100 {isActive('/agents') ? 'bg-gray-50 text-primary font-medium' : ''}">
+          Agents
         </a>
         <a href="/settings" onclick={closeMenu} class="block px-4 py-3 text-gray-700 hover:bg-gray-100 {isActive('/settings') ? 'bg-gray-50 text-primary font-medium' : ''}">
           Settings

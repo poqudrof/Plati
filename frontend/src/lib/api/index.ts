@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, SshxStatusResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, TransferResult, TransferOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate } from './types';
+import type { User, SSHKey, InstanceAuthorizedKey, Secret, InstanceSecret, InstanceStats, InstanceStorageInfo, SshxURLResult, SshxStatusResult, InstanceLinksResult, InstanceLinksUpdate, TailscaleServeResult, TailscaleStatusResult, Template, Instance, AdminInstance, RenameResult, RenameOptions, TransferResult, TransferOptions, Server, ImageSummary, SetupRequest, UserSSHKey, GeneratedKeyResult, ManagedSSHKey, GeneratedManagedKeyResult, AdminGeneratedUserKeyResult, IncusDetail, IncusConfigUpdate, UserPreferences, MixinInfo, ExecResult, GitRepo, FileEntry, VolumeSnapshot, DiskInfo, ProfileCheck, ApiKey, GeneratedApiKeyResult, SleepSettings, InstanceResources, ResourceUpdate, McpLimits, McpQuota, McpInfo } from './types';
 
 // Setup
 export const setup = {
@@ -36,6 +36,8 @@ export const users = {
   deleteSecret: (id: number) => api.del(`/api/v1/secrets/${id}`),
   // API keys: view + regenerate own. Only admins can mint a new one — see admin.users.apiKeys.
   listApiKeys: () => api.get<ApiKey[]>('/api/v1/api-keys'),
+  mcpQuota: () => api.get<McpQuota>('/api/v1/mcp/quota'),
+  mcpInfo: () => api.get<McpInfo>('/api/v1/mcp/info'),
   regenerateApiKey: (id: number) =>
     api.post<GeneratedApiKeyResult>(`/api/v1/api-keys/${id}/regenerate`)
 };
@@ -215,7 +217,9 @@ export const admin = {
   settings: {
     getTailscaleKey: () => api.get<{ configured: boolean }>('/api/v1/admin/settings/tailscale-key'),
     setTailscaleKey: (value: string) => api.put('/api/v1/admin/settings/tailscale-key', { value }),
-    deleteTailscaleKey: () => api.del('/api/v1/admin/settings/tailscale-key')
+    deleteTailscaleKey: () => api.del('/api/v1/admin/settings/tailscale-key'),
+    getMcpLimits: () => api.get<McpLimits>('/api/v1/admin/settings/mcp-limits'),
+    setMcpLimits: (limits: McpLimits) => api.put<McpLimits>('/api/v1/admin/settings/mcp-limits', limits)
   },
   disks: {
     list: () => api.get<DiskInfo[]>('/api/v1/admin/disks')

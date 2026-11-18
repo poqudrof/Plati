@@ -27,7 +27,8 @@ export default defineConfig({
         ws: true
       },
       '/auth': backendUrl,
-      '/health': backendUrl
+      '/health': backendUrl,
+      '/mcp': backendUrl
     }
   }
 });

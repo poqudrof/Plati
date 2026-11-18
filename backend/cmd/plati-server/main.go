@@ -16,6 +16,7 @@ import (
 	"github.com/homaserver/plati/internal/config"
 	"github.com/homaserver/plati/internal/database"
 	"github.com/homaserver/plati/internal/handlers"
+	"github.com/homaserver/plati/internal/mcp"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
 	"github.com/homaserver/plati/internal/router"
@@ -204,6 +205,7 @@ func main() {
 		SleepHandler:         sleepHandler,
 		APIKeyHandler:        apiKeyHandler,
 		APIKeyAuth:           apiKeySvc.AsAuthenticator(),
+		MCP:                  mcp.NewServer(db, cfg.Server.FrontendURL),
 		JWTSecret:            cfg.Auth.JWTSecret,
 		FrontendURL:          cfg.Server.FrontendURL,
 	})

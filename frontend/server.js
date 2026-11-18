@@ -21,7 +21,7 @@ const host = process.env.HOST ?? '0.0.0.0';
 const port = Number(process.env.PORT ?? 3000);
 
 // Mêmes préfixes que vite.config.ts — les garder synchronisés.
-const PROXIED = ['/api', '/auth', '/health'];
+const PROXIED = ['/api', '/auth', '/health', '/mcp'];
 
 function isProxied(url) {
   const path = (url ?? '/').split('?')[0];

@@ -27,6 +27,7 @@ import (
 	"github.com/homaserver/plati/internal/config"
 	"github.com/homaserver/plati/internal/database"
 	"github.com/homaserver/plati/internal/handlers"
+	"github.com/homaserver/plati/internal/mcp"
 	"github.com/homaserver/plati/internal/incus"
 	"github.com/homaserver/plati/internal/models"
 	"github.com/homaserver/plati/internal/router"
@@ -453,6 +454,7 @@ func newHarness(t *testing.T) *harness {
 		SleepHandler:  handlers.NewSleepHandler(services.NewSleepService(db, pool, 4*time.Hour)),
 		RepoHandler:   handlers.NewRepoHandler(repoSvc),
 		APIKeyHandler: handlers.NewAPIKeyHandler(apiKeySvc),
+		MCP:           mcp.NewServer(db, "http://localhost:5173"),
 		APIKeyAuth:    apiKeySvc.AsAuthenticator(),
 		JWTSecret:     jwtSecret,
 		FrontendURL:   "http://localhost",
@@ -2428,6 +2430,7 @@ func newHarnessWithReposDir(t *testing.T, reposDir string) *harness {
 		SleepHandler:  handlers.NewSleepHandler(services.NewSleepService(db, pool, 4*time.Hour)),
 		RepoHandler:   handlers.NewRepoHandler(repoSvc),
 		APIKeyHandler: handlers.NewAPIKeyHandler(apiKeySvc),
+		MCP:           mcp.NewServer(db, "http://localhost:5173"),
 		APIKeyAuth:    apiKeySvc.AsAuthenticator(),
 		JWTSecret:     jwtSecret,
 		FrontendURL:   "http://localhost",

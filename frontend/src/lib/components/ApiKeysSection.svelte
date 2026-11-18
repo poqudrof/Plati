@@ -3,6 +3,10 @@
   import { users } from '$lib/api';
   import { addNotification } from '$lib/stores/notifications';
 
+  // onReveal receives a freshly regenerated key, so a page can use it (e.g. /agents
+  // fills it into its connection snippets).
+  let { onReveal }: { onReveal?: (key: string) => void } = $props();
+
   let apiKeys: ApiKey[] = $state([]);
   let busy = $state(false);
   let revealedKey: string | null = $state(null);
@@ -18,6 +22,7 @@
     try {
       const result = await users.regenerateApiKey(id);
       revealedKey = result.key;
+      onReveal?.(result.key);
       await loadApiKeys();
     } catch (e: any) {
       addNotification('error', e.message);

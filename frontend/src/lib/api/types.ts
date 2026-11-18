@@ -60,6 +60,24 @@ export interface AdminGeneratedUserKeyResult {
 
 // API key for programmatic access (agents/scripts). The secret itself is
 // never returned except once, right after create/regenerate.
+// Limits on creating instances through the MCP endpoint (/mcp). 0 turns creation off.
+export interface McpLimits {
+  max_instances: number;
+  max_creations_per_hour: number;
+}
+
+export interface McpQuota extends McpLimits {
+  instances: number;
+  creations_last_hour: number;
+  next_creation_possible_at?: string;
+}
+
+export interface McpInfo {
+  quota: McpQuota;
+  tools: { name: string; title: string; description: string; read_only: boolean }[];
+  protocol_version: string;
+}
+
 export interface ApiKey {
   id: number;
   user_id: number;

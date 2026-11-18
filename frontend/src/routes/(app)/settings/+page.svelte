@@ -128,6 +128,17 @@
     <ApiKeysSection />
   </section>
 
+  <!-- ─── MCP: a pointer, the setup lives on its own page ─────── -->
+  <section>
+    <a href="/agents" class="card-static p-4 flex items-center justify-between hover:border-primary/40 transition-colors">
+      <span>
+        <span class="block text-sm font-bold text-gray-900">Connect an agent (MCP)</span>
+        <span class="block text-sm text-gray-500">Drive your machines from an AI agent or your own code with this API key.</span>
+      </span>
+      <span class="text-primary text-sm shrink-0 ml-4">Open →</span>
+    </a>
+  </section>
+
   <!-- ─── Machine Keys ────────────────────────────────────────── -->
   {#if prefs}
   <section>

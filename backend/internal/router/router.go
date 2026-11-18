@@ -6,6 +6,7 @@ import (
 
 	"github.com/homaserver/plati/internal/auth"
 	"github.com/homaserver/plati/internal/handlers"
+	"github.com/homaserver/plati/internal/mcp"
 	mw "github.com/homaserver/plati/internal/middleware"
 )
 
@@ -27,6 +28,7 @@ type Deps struct {
 	SleepHandler         *handlers.SleepHandler
 	APIKeyHandler        *handlers.APIKeyHandler
 	APIKeyAuth           auth.APIKeyAuthenticator
+	MCP                  *mcp.Server // serves /mcp; nil leaves the endpoint out
 	JWTSecret            string
 	FrontendURL          string
 }
@@ -53,6 +55,13 @@ func New(deps Deps) *chi.Mux {
 	r.Get("/auth/entra", deps.AuthHandler.LoginEntra)
 	r.Get("/auth/callback", deps.AuthHandler.CallbackEntra)
 	r.Post("/auth/logout", deps.AuthHandler.Logout)
+
+	// MCP endpoint (Streamable HTTP). API key only — see mcp.RequireBearer. Its tools
+	// forward to the /api/v1 routes below, through this same router.
+	if deps.MCP != nil {
+		deps.MCP.SetAPI(r)
+		r.Handle("/mcp", mcp.RequireBearer(auth.AuthMiddleware(deps.JWTSecret, deps.APIKeyAuth)(deps.MCP)))
+	}
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
@@ -86,6 +95,10 @@ func New(deps Deps) *chi.Mux {
 
 			// API keys (view + regenerate own; only admins can create — see /admin/users/{id}/api-keys)
 			r.Get("/api-keys", deps.APIKeyHandler.ListMine)
+			if deps.MCP != nil {
+				r.Get("/mcp/quota", deps.MCP.GetQuota)
+				r.Get("/mcp/info", deps.MCP.GetInfo)
+			}
 			r.Post("/api-keys/{id}/regenerate", deps.APIKeyHandler.RegenerateMine)
 
 			// Disks (user's own volumes)
@@ -220,6 +233,10 @@ func New(deps Deps) *chi.Mux {
 				r.Get("/settings/tailscale-key", deps.AdminSettingsHandler.GetTailscaleKey)
 				r.Put("/settings/tailscale-key", deps.AdminSettingsHandler.SetTailscaleKey)
 				r.Delete("/settings/tailscale-key", deps.AdminSettingsHandler.DeleteTailscaleKey)
+				if deps.MCP != nil {
+					r.Get("/settings/mcp-limits", deps.MCP.GetLimits)
+					r.Put("/settings/mcp-limits", deps.MCP.PutLimits)
+				}
 
 				// Disks (all volumes, admin view)
 				r.Get("/disks", deps.AdminHandler.ListAllDisks)

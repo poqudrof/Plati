@@ -167,7 +167,7 @@ handlers → services → queries → database (SQLite)
 
 SQLite WAL mode, single writer (`MaxOpenConns=1`). Migrations in `backend/internal/database/migrations/`, embedded via `go:embed`, applied at startup.
 
-Tables: `users`, `ssh_keys`, `secrets`, `servers`, `templates`, `volumes`, `instances`, `settings`, `user_preferences`, `instance_volumes`.
+Tables: `users`, `ssh_keys`, `secrets`, `servers`, `templates`, `volumes`, `instances`, `settings`, `user_preferences`, `instance_volumes`, `mcp_instance_creations`.
 
 ## Auth
 
@@ -214,6 +214,51 @@ refused, then works once it is switched back.
 this with random operation sequences checked against a model after every step. It prints
 its seed; replay a failure with `PLATI_GEN_SEED=<seed>`, search wider with
 `PLATI_GEN_RUNS` / `PLATI_GEN_STEPS`.
+
+## MCP Endpoint
+
+`/mcp` serves Plati as a remote MCP server (Streamable HTTP, **stateless**: JSON answers,
+no SSE, no session id) so an agent or a script can drive its owner's machines. Code lives
+in `internal/mcp/` (`server.go` protocol, `tools.go` tools, `limits.go` limits). Admins
+set the limits in **Admin → Settings → MCP creation limits**.
+
+Users connect from the **Agents** page (`/agents`, navbar; Settings links to it): the
+endpoint, their API key (regenerating it there fills it into the snippets), ready-to-paste
+Claude Code / JSON / curl snippets, their quota and the tool list — the last two from
+`GET /api/v1/mcp/info`, so the page never drifts from the server. The endpoint shown is
+`window.location.origin + /mcp`, not `frontend_url` (which is `127.0.0.1:5300` here): opened
+through the tailnet URL, the page shows the tailnet URL, and it warns when opened through a
+local address. The page cannot live under `/mcp…`: Vite's proxy matches by prefix.
+
+```bash
+claude mcp add --transport http plati https://<host>/mcp --header "Authorization: Bearer <api key>"
+```
+
+**Built on the API.** Every tool forwards to an existing `/api/v1` route through the same
+router (`call.api`, an in-process request carrying the caller's `Authorization` header),
+so validation, ownership and side effects are the API's own. What the package adds is
+policy:
+
+- **API key only.** `mcp.RequireBearer` refuses a request without `Authorization:
+  Bearer` — the session cookie does not count, or any page the user visits could drive
+  their machines. An `Origin` other than `frontend_url` is a 403 (DNS-rebinding guard).
+- **Own instances only**, even with an admin's key: `call.ownInstance` resolves with a
+  non-admin `auth.Actor` before forwarding.
+- **No delete, no rebuild.** The tools: `get_mcp_quota`, `list_templates` (active only),
+  `list_instances`, `get_instance` (+ auto-stop and resources), `get_instance_stats`,
+  `get_instance_links`, `create_instance`, `start_instance`, `stop_instance`,
+  `restart_instance`, `rename_instance`, `update_auto_stop`, `reset_auto_stop_timer`,
+  `update_links`. Unknown arguments are refused (`tool.checkArgs`), not ignored.
+- **Creation limits**, admins included — `settings` keys `mcp_max_instances` (default 3,
+  max 50) and `mcp_max_creations_per_hour` (default 5, max 100); 0 turns creation off.
+  Each MCP creation is a row in `mcp_instance_creations` (migration 024). The quota counts
+  rows that still join an instance the user owns (UI-created machines do not count;
+  deleting or transferring frees a slot); the hourly rate counts rows in the last hour,
+  deleted instances included, so delete-and-recreate cannot get around it. Check, create
+  and record run under `Server.createMu`.
+
+`/mcp` must stay in the frontend proxy lists (`vite.config.ts` and `server.js`'s
+`PROXIED`): the tailnet URL reaches the frontend, not the backend.
 
 ## Incus Integration
 
@@ -439,6 +484,10 @@ Volume listing uses the existing `GET /api/v1/instances/{id}/volumes` endpoint (
 | `PUT` | `/api/v1/instances/{id}/links` | Partial: `{"hostname","openvscode","sshx": bool, "custom": [{"label","url","pinned"}]}`, omitted fields kept |
 | `GET` | `/api/v1/instances/{id}/sshx` | sshx build in the instance vs the one the mixin ships (`update_available` compares sha256, not the version string) |
 | `POST` | `/api/v1/instances/{id}/sshx/update` | Redeploy the shipped sshx binary and restart the service |
+| `GET` | `/api/v1/mcp/quota` | Caller's MCP creation limits and usage (same as the `get_mcp_quota` tool) |
+| `GET` | `/api/v1/mcp/info` | Quota + tool list, for the `/agents` page |
+| `GET` | `/api/v1/admin/settings/mcp-limits` | MCP creation limits `{"max_instances","max_creations_per_hour"}` |
+| `PUT` | `/api/v1/admin/settings/mcp-limits` | Set both (0–50 / 0–100; 0 turns MCP creation off) |
 | `GET` | `/api/v1/preferences` | Get current user's preferences |
 | `PUT` | `/api/v1/preferences` | Update SSH key mode / Tailscale mode |
 | `GET` | `/api/v1/admin/settings/tailscale-key` | Check if platform key configured (`{"configured": bool}`) |
