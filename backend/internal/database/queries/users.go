@@ -74,28 +74,45 @@ func CreateSSHOnlyUser(db *sqlx.DB, email, name string) (int64, error) {
 }
 
 // SetUserSSHOnly switches an account to or from SSH-only. Turning it on also drops the
-// password hash and the admin role, so turning it back off grants nothing by itself:
-// the admin has to set a password.
+// password hash and the admin role, bumps session_version and deletes the account's API
+// keys, so turning it back off grants nothing by itself: every open session and every
+// existing key stays revoked, and the admin has to set a password or mint a new key.
 func SetUserSSHOnly(db *sqlx.DB, id int64, sshOnly bool) error {
 	if !sshOnly {
 		_, err := db.Exec("UPDATE users SET ssh_only = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
 		return err
 	}
-	_, err := db.Exec(
-		"UPDATE users SET ssh_only = 1, password_hash = NULL, role = 'user', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+	tx, err := db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	if _, err := tx.Exec(
+		`UPDATE users SET ssh_only = 1, password_hash = NULL, role = 'user',
+		 session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		id,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM api_keys WHERE user_id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// IsUserSSHOnly reports whether the account is barred from logging in. A missing user
-// reads as false: whether a deleted account's token still works is not this check's call.
-func IsUserSSHOnly(db *sqlx.DB, id int64) bool {
-	var sshOnly bool
-	if err := db.Get(&sshOnly, "SELECT ssh_only FROM users WHERE id = ?", id); err != nil {
+// IsSessionRevoked reports whether a JWT issued under sessionVersion may no longer be
+// used: the account is SSH-only, or was switched to SSH-only since the token was issued.
+// A missing user reads as false: whether a deleted account's token still works is not
+// this check's call.
+func IsSessionRevoked(db *sqlx.DB, id, sessionVersion int64) bool {
+	var row struct {
+		SSHOnly bool  `db:"ssh_only"`
+		Version int64 `db:"session_version"`
+	}
+	if err := db.Get(&row, "SELECT ssh_only, session_version FROM users WHERE id = ?", id); err != nil {
 		return false
 	}
-	return sshOnly
+	return row.SSHOnly || row.Version != sessionVersion
 }
 
 func UpdateUser(db *sqlx.DB, id int64, name, role string) error {

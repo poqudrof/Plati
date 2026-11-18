@@ -156,7 +156,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) setTokenCookie(w http.ResponseWriter, user *models.User) {
-	token, err := auth.GenerateToken(user.ID, user.Email, user.Role, h.cfg.Auth.JWTSecret, h.cfg.Auth.JWTLifetimeHours)
+	token, err := auth.GenerateToken(user.ID, user.Email, user.Role, user.SessionVersion, h.cfg.Auth.JWTSecret, h.cfg.Auth.JWTLifetimeHours)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return

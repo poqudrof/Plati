@@ -139,7 +139,7 @@
   async function saveUser() {
     if (!editingUser || !editUserValid) return;
     if (editingUser.sshOnly && !editingUser.wasSSHOnly &&
-        !confirm(`Switch ${editingUser.email} to SSH only? Their password is removed and they are logged out of Plati right away.`)) return;
+        !confirm(`Switch ${editingUser.email} to SSH only? Their password is removed, their API keys are revoked and they are logged out of Plati right away.`)) return;
     const password = editingUser.sshOnly ? '' : editingUser.password;
     editingBusy = true;
     try {
@@ -1310,7 +1310,7 @@
 
         {#if editingUser.sshOnly && !editingUser.wasSSHOnly}
           <div class="p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            Switching to SSH only removes their password and ends any open session right away. Their SSH keys are kept.
+            Switching to SSH only removes their password, revokes their API keys and ends any open session right away. Switching back restores none of them. Their SSH keys are kept.
           </div>
         {:else if !editingUser.sshOnly && editingUser.wasSSHOnly}
           <div class="p-3 rounded-md bg-primary-50 border border-primary/20 text-sm text-gray-700">

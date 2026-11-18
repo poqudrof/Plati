@@ -11,14 +11,18 @@ type Claims struct {
 	UserID int64  `json:"user_id"`
 	Email  string `json:"email"`
 	Role   string `json:"role"`
+	// SessionVersion is users.session_version at issue time. Tokens from before the
+	// claim existed decode as 0, which is also the column's default.
+	SessionVersion int64 `json:"sv,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID int64, email, role, secret string, lifetimeHours int) (string, error) {
+func GenerateToken(userID int64, email, role string, sessionVersion int64, secret string, lifetimeHours int) (string, error) {
 	claims := Claims{
-		UserID: userID,
-		Email:  email,
-		Role:   role,
+		UserID:         userID,
+		Email:          email,
+		Role:           role,
+		SessionVersion: sessionVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(lifetimeHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

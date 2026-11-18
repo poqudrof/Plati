@@ -17,12 +17,13 @@ type ContextUser struct {
 }
 
 // APIKeyAuthenticator resolves a plaintext API key to its owning user. It is also the
-// middleware's only window on the database, hence LoginBlocked: a JWT is checked
+// middleware's only window on the database, hence SessionRevoked: a JWT is checked
 // against it so that switching an account to SSH-only ends a session already open,
-// instead of leaving it valid until the token expires.
+// instead of leaving it valid until the token expires — and keeps it ended if the
+// account is switched back.
 type APIKeyAuthenticator interface {
 	Authenticate(plaintext string) (*ContextUser, error)
-	LoginBlocked(userID int64) bool
+	SessionRevoked(userID, sessionVersion int64) bool
 }
 
 func AuthMiddleware(jwtSecret string, apiKeys APIKeyAuthenticator) func(http.Handler) http.Handler {
@@ -51,8 +52,8 @@ func AuthMiddleware(jwtSecret string, apiKeys APIKeyAuthenticator) func(http.Han
 				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 				return
 			}
-			if apiKeys.LoginBlocked(claims.UserID) {
-				http.Error(w, `{"error":"this account has SSH access only"}`, http.StatusUnauthorized)
+			if apiKeys.SessionRevoked(claims.UserID, claims.SessionVersion) {
+				http.Error(w, `{"error":"session revoked"}`, http.StatusUnauthorized)
 				return
 			}
 

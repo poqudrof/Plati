@@ -111,6 +111,6 @@ func (a apiKeyAuthenticator) Authenticate(plaintext string) (*auth.ContextUser, 
 	return &auth.ContextUser{ID: user.ID, Email: user.Email, Role: user.Role}, nil
 }
 
-func (a apiKeyAuthenticator) LoginBlocked(userID int64) bool {
-	return queries.IsUserSSHOnly(a.svc.db, userID)
+func (a apiKeyAuthenticator) SessionRevoked(userID, sessionVersion int64) bool {
+	return queries.IsSessionRevoked(a.svc.db, userID, sessionVersion)
 }

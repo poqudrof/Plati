@@ -63,6 +63,11 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email and password are required")
 		return
 	}
+	if len(req.Password) < services.MinPasswordLength {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("password must be at least %d characters", services.MinPasswordLength))
+		return
+	}
 	if req.Role != "admin" && req.Role != "user" {
 		req.Role = "user"
 	}

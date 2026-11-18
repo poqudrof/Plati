@@ -31,9 +31,12 @@ type User struct {
 	PasswordHash sql.NullString `db:"password_hash" json:"-"`
 	// SSHOnly marks someone who only has SSH keys: no password, and every way of
 	// logging into Plati refuses them. Always a "user", never an admin.
-	SSHOnly   bool      `db:"ssh_only" json:"ssh_only"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time      `db:"updated_at" json:"updated_at"`
+	SSHOnly bool `db:"ssh_only" json:"ssh_only"`
+	// SessionVersion is bumped each time the account is switched to SSH-only; a JWT
+	// issued under an older version is refused (auth.Claims.SessionVersion).
+	SessionVersion int64     `db:"session_version" json:"-"`
+	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updated_at"`
 }
 
 type APIKey struct {

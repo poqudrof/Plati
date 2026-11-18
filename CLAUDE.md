@@ -198,8 +198,22 @@ plus an optional `public_key` / `key_name` registering their first key in the sa
 `password_hash` and forces `role = 'user'`; an SSH-only account cannot be given a password
 or the admin role (400). Every auth path refuses them: password login, the Entra callback
 (403), API keys, and an **already-issued JWT** — `AuthMiddleware` asks
-`APIKeyAuthenticator.LoginBlocked` on every cookie request, so switching an account ends
+`APIKeyAuthenticator.SessionRevoked` on every cookie request, so switching an account ends
 its open session instead of leaving it valid until the token expires.
+
+That session stays ended if the account is switched **back**: each switch to SSH-only bumps
+`users.session_version` (migration 023), the JWT carries the version it was issued under
+(`sv`), and a mismatch is a 401. Checking `ssh_only` alone used to revive the old session —
+with the role in its token, so a former admin got admin access back. API keys get the same
+treatment: the switch **deletes** the account's `api_keys` rows, in the same transaction as
+the `session_version` bump (`queries.SetUserSSHOnly`), so an old key stays a 401 after the
+switch back and the admin mints a new one. A key minted while the account is SSH-only is
+refused, then works once it is switched back.
+
+`TestSSHOnlyUsers_Generative` (`integration/ssh_only_generative_test.go`) drives all of
+this with random operation sequences checked against a model after every step. It prints
+its seed; replay a failure with `PLATI_GEN_SEED=<seed>`, search wider with
+`PLATI_GEN_RUNS` / `PLATI_GEN_STEPS`.
 
 ## Incus Integration
 
